@@ -1,5 +1,6 @@
 import time
 from datetime import datetime
+
 import pandas as pd
 import ccxt
 
@@ -20,14 +21,28 @@ try:
 except Exception as e:
     print(f"[EXCHANGE WARN] load_markets failed: {e}", flush=True)
 
-def fetch_historical_data(symbol):
+
+def fetch_historical_data(symbol: str) -> pd.DataFrame:
+    """
+    Fetch historical candles for a CCXT symbol like 'BTC/USDT'.
+    Returns an indicator-enriched DataFrame or an empty DataFrame on failure.
+    """
     try:
         bars = exchange.fetch_ohlcv(symbol, timeframe=DEFAULT_TIMEFRAME, limit=CANDLE_LIMIT)
-        df = pd.DataFrame(bars, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+        if not bars:
+            return pd.DataFrame()
+
+        df = pd.DataFrame(
+            bars,
+            columns=["timestamp", "open", "high", "low", "close", "volume"],
+        )
+        df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms", utc=True)
         return compute_indicators(df)
+
     except Exception as e:
         print(f"[FETCH ERROR] {symbol}: {e}", flush=True)
         return pd.DataFrame()
+
 
 def run_bot():
     print("🤖 BOT LOOP STARTED (v6 alpha)", flush=True)
@@ -38,14 +53,19 @@ def run_bot():
         print(f"❤️ [HEARTBEAT] Bot alive at {timestamp}", flush=True)
 
         conn = None
+        cur = None
+
         try:
             conn = get_conn()
             cur = conn.cursor()
 
+            # Prevent multiple bot instances from trading at the same time.
             cur.execute("SELECT pg_try_advisory_lock(12345)")
-            if not cur.fetchone()[0]:
+            locked = cur.fetchone()[0]
+            if not locked:
                 print("[SKIP] Another instance has the lock.", flush=True)
                 conn.close()
+                conn = None
                 time.sleep(10)
                 continue
 
@@ -61,8 +81,17 @@ def run_bot():
             active_trades = int(cur.fetchone()[0] or 0)
 
             for symbol in SYMBOLS:
-                price = feeds[symbol].get_price() if symbol in feeds else None
-                if not price:
+                feed = feeds.get(symbol)
+                if feed is None:
+                    continue
+
+                try:
+                    price = feed.get_price()
+                except Exception as e:
+                    print(f"[FEED ERROR] {symbol}: {e}", flush=True)
+                    continue
+
+                if price is None or price <= 0:
                     continue
 
                 df = fetch_historical_data(symbol)
@@ -70,6 +99,7 @@ def run_bot():
                     continue
 
                 signal = generate_signal(symbol, df)
+
                 cur.execute("SELECT * FROM positions WHERE symbol=%s", (symbol,))
                 pos = cur.fetchone()
 
@@ -87,16 +117,16 @@ def run_bot():
                         price=price,
                         total_cap=total_cap,
                         stop_loss_pct=signal.stop_loss_pct,
-                        confidence=signal.confidence
+                        confidence=signal.confidence,
                     )
 
-                    if size > 0:
+                    if size and size > 0:
                         open_position(cur, symbol, price, size, deployed, signal)
                         last_trade_time[symbol] = now
                         active_trades += 1
                         print(
                             f"🚀 ENTERED {symbol} | Regime={signal.regime} | Value=${deployed:.2f} | Cap=${total_cap:.2f}",
-                            flush=True
+                            flush=True,
                         )
 
                 elif pos:
@@ -106,10 +136,26 @@ def run_bot():
 
         except Exception as e:
             if conn:
-                conn.rollback()
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
             print(f"[CRITICAL ERROR] {e}", flush=True)
+
         finally:
+            if cur:
+                try:
+                    cur.close()
+                except Exception:
+                    pass
             if conn:
-                conn.close()
+                try:
+                    conn.close()
+                except Exception:
+                    pass
 
         time.sleep(12)
+
+
+if __name__ == "__main__":
+    run_bot()

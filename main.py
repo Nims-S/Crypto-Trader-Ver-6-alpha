@@ -10,11 +10,34 @@ from config import PORT, SYMBOLS, CAPITAL, BOT_VERSION, RESET_TOKEN
 from price_feed import feeds
 from risk import get_dynamic_capital
 from state import get_state
-from flask import jsonify
-from state import update_asset
+
 
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
+
+def get_positions_from_db():
+    conn = None
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        cur.execute("SELECT symbol, entry, sl, tp, size, regime, confidence FROM positions")
+        rows = cur.fetchall()
+
+        return [{
+            "symbol": r[0],
+            "entry": r[1],
+            "sl": r[2],
+            "tp": r[3],
+            "size": r[4],
+            "regime": r[5],
+            "confidence": r[6]
+        } for r in rows]
+
+    except Exception as e:
+        return {"error": str(e)}
+    finally:
+        if conn:
+            conn.close()
 
 @app.route("/")
 def home():
@@ -32,7 +55,11 @@ def positions_view():
         formatted = []
         for r in rows:
             symbol = r[0]
-            live_price = feeds[symbol].get_price() if symbol in feeds else None
+            feed = feeds.get(symbol)
+            try:
+                live_price = feed.get_price() if feed else None
+            except Exception:
+                live_price = None
             display_price = live_price if live_price else r[1]
             pnl = round((display_price - r[1]) * r[4], 2)
 
@@ -56,6 +83,12 @@ def positions_view():
 @app.route("/caffeine/state", methods=["GET"])
 def caffeine_state():
     return jsonify(get_state())
+@app.route("/caffeine/full", methods=["GET"])
+def caffeine_full():
+    return jsonify({
+        "state": get_state(),
+        "positions": get_positions_from_db()
+    })
 
 @app.route("/risk")
 def risk_report():
@@ -123,7 +156,14 @@ def trades():
     finally:
         if conn:
             conn.close()
-
+@app.route("/caffeine/health", methods=["GET"])
+def caffeine_health():
+    state = get_state()
+    return jsonify({
+        "status": "ok",
+        "last_update": state.get("last_update"),
+        "assets_tracked": len(state.get("assets", {}))
+    })
 @app.route("/debug")
 def debug():
     return {"bot": "running", "version": BOT_VERSION}
@@ -158,13 +198,29 @@ def reset():
 def background_executor():
     print("⏳ Waiting for web server to stabilize...", flush=True)
     time.sleep(5)
+
+    conn = None
     try:
+        conn = get_conn()
+        cur = conn.cursor()
+
+        cur.execute("SELECT pg_try_advisory_lock(99999)")
+        if not cur.fetchone()[0]:
+            print("⚠️ Another bot instance is already running. Skipping start.", flush=True)
+            return
+
         print("🗄️ Initializing Database...", flush=True)
         init_db()
+
         print("🤖 Starting Bot Loop...", flush=True)
         run_bot()
+
     except Exception as e:
         print(f"❌ CRITICAL BACKGROUND ERROR: {e}", flush=True)
+
+    finally:
+        if conn:
+            conn.close()
 
 t = threading.Thread(target=background_executor, daemon=True)
 t.start()

@@ -9,6 +9,9 @@ from db import init_db, get_conn
 from config import PORT, SYMBOLS, CAPITAL, BOT_VERSION, RESET_TOKEN
 from price_feed import feeds
 from risk import get_dynamic_capital
+from state import get_state
+from flask import jsonify
+from state import update_asset
 
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
@@ -50,6 +53,9 @@ def positions_view():
     finally:
         if conn:
             conn.close()
+@app.route("/caffeine/state", methods=["GET"])
+def caffeine_state():
+    return jsonify(get_state())
 
 @app.route("/risk")
 def risk_report():

@@ -1,6 +1,7 @@
 import time
 from datetime import datetime
-
+from caffeine import push_to_caffeine
+from state import get_state
 import pandas as pd
 import ccxt
 
@@ -10,7 +11,7 @@ from config import SYMBOLS, CAPITAL, MAX_COOLDOWN_SECONDS, CANDLE_LIMIT, DEFAULT
 from strategy import generate_signal, compute_indicators
 from risk import calculate_position, get_dynamic_capital, risk_gate
 from execution import open_position, manage_position
-
+from state import update_asset
 exchange = ccxt.binance({
     "enableRateLimit": True,
     "timeout": 15000,
@@ -103,6 +104,30 @@ def run_bot():
                 cur.execute("SELECT * FROM positions WHERE symbol=%s", (symbol,))
                 pos = cur.fetchone()
 
+                # ✅ ADD THIS BLOCK RIGHT HERE
+                strategy_name = getattr(signal, "strategy", "unknown") if signal else "none"
+                regime = getattr(signal, "regime", "unknown") if signal else "unknown"
+
+                position_data = None
+                if pos:
+                    position_data = {
+                        "entry_price": pos[2],
+                        "size": pos[3],
+                        "stop_loss": pos[4],
+                        "take_profit": pos[5]
+                    }
+
+                update_asset(
+                    symbol=symbol,
+                    regime=regime,
+                    strategy=strategy_name,
+                    signal={
+                         "side": signal.side if signal else None,
+                         "confidence": getattr(signal, "confidence", None)
+                    } if signal else None,
+                    position=position_data
+                )
+                # ✅ END BLOCK
                 if signal and signal.side == "LONG" and not pos:
                     if active_trades >= 3:
                         print(f"⚠️ Max positions reached. Skipping {symbol}.", flush=True)
@@ -122,18 +147,35 @@ def run_bot():
 
                     if size and size > 0:
                         open_position(cur, symbol, price, size, deployed, signal)
+
+                        # ✅ ADD THIS BLOCK RIGHT AFTER OPEN_POSITION
+                        update_asset(
+                            symbol=symbol,
+                            regime=regime,
+                            strategy=strategy_name,
+                            signal={
+                                 "side": "LONG",
+                                 "confidence": signal.confidence
+                            },
+                            position={
+                                "entry_price": price,
+                                "size": size,
+                                "stop_loss": signal.stop_loss_pct,
+                                "take_profit": getattr(signal, "take_profit", None)
+                            }
+                        )
+                        # ✅ END ADD  
+                        # ✅ ADD THESE BACK
                         last_trade_time[symbol] = now
                         active_trades += 1
-                        print(
-                            f"🚀 ENTERED {symbol} | Regime={signal.regime} | Value=${deployed:.2f} | Cap=${total_cap:.2f}",
-                            flush=True,
-                        )
-
                 elif pos:
                     manage_position(cur, symbol, pos, price)
-
+            
             conn.commit()
-
+            try:
+                push_to_caffeine(get_state())
+            except Exception as e:
+                print(f"[CAFFEINE LOOP ERROR] {e}", flush=True)
         except Exception as e:
             if conn:
                 try:

@@ -7,7 +7,7 @@ import ccxt
 
 from price_feed import feeds
 from db import get_conn
-from config import SYMBOLS, CAPITAL, MAX_COOLDOWN_SECONDS, CANDLE_LIMIT, DEFAULT_TIMEFRAME
+from config import SYMBOLS, CAPITAL, MAX_COOLDOWN_SECONDS, CANDLE_LIMIT, DEFAULT_TIMEFRAME, MAX_POSITIONS
 from strategy import generate_signal, compute_indicators
 from risk import calculate_position, get_dynamic_capital, risk_gate
 from execution import open_position, manage_position
@@ -148,7 +148,7 @@ def run_bot():
                 )
                 # ✅ END BLOCK
                 if signal and signal.side == "LONG" and not pos:
-                    if active_trades >= 3:
+                    if active_trades >= MAX_POSITIONS:
                         print(f"⚠️ Max positions reached. Skipping {symbol}.", flush=True)
                         continue
 
@@ -173,7 +173,8 @@ def run_bot():
                             deployed,
                             direction=signal.side,
                             regime=signal.regime,
-                            atr=getattr(signal, "atr", None)
+                            atr=getattr(signal, "atr", None),
+                            confidence=signal.confidence,
                         )
 
                         # ✅ ADD THIS BLOCK RIGHT AFTER OPEN_POSITION

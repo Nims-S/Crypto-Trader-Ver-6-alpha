@@ -1,4 +1,4 @@
-from config import CAPITAL, ALLOCATION, RISK, MAX_POSITIONS, MAX_SYMBOL_EXPOSURE_PCT, MAX_DAILY_LOSS_PCT, MAX_WEEKLY_LOSS_PCT
+from config import CAPITAL, ALLOCATION, RISK, MAX_SYMBOL_EXPOSURE_PCT, MAX_DAILY_LOSS_PCT, MAX_WEEKLY_LOSS_PCT
 
 def get_dynamic_capital(cur, initial_capital):
     """Total capital = initial capital + closed trade PnL."""
@@ -27,8 +27,6 @@ def risk_gate(cur, total_capital):
         return False, "Daily loss limit reached"
     if week_pnl <= -(total_capital * MAX_WEEKLY_LOSS_PCT):
         return False, "Weekly loss limit reached"
-    if get_position_count(cur) >= MAX_POSITIONS:
-        return False, "Max positions reached"
     return True, "OK"
 
 def calculate_position(symbol, price, total_cap, stop_loss_pct=0.005, confidence=0.5):

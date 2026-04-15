@@ -14,6 +14,9 @@ from state import get_state
 
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
+BOT_THREAD_LOCK = threading.Lock()
+BOT_THREAD_STARTED = False
+BOT_THREAD_ENABLED = os.getenv("BOT_THREAD_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
 
 def get_positions_from_db():
     conn = None
@@ -222,9 +225,25 @@ def background_executor():
         if conn:
             conn.close()
 
-t = threading.Thread(target=background_executor, daemon=True)
-t.start()
+def start_background_executor_once():
+    global BOT_THREAD_STARTED
+
+    if not BOT_THREAD_ENABLED:
+        return
+
+    with BOT_THREAD_LOCK:
+        if BOT_THREAD_STARTED:
+            return
+        thread = threading.Thread(target=background_executor, daemon=True)
+        thread.start()
+        BOT_THREAD_STARTED = True
+
+
+@app.before_request
+def ensure_background_executor_started():
+    start_background_executor_once()
 
 if __name__ == "__main__":
+    start_background_executor_once()
     port = int(os.environ.get("PORT", PORT))
     app.run(host="0.0.0.0", port=port)

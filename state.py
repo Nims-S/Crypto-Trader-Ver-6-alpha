@@ -1,6 +1,8 @@
 # state.py (NEW FILE)
-
 from datetime import datetime
+import json
+from db import get_conn
+
 
 STATE = {
     "last_update": None,
@@ -27,10 +29,12 @@ def update_asset(symbol, regime, strategy, signal=None, position=None):
         json.dumps(signal),
         json.dumps(position)
     ))
+    print(f"[STATE UPDATE] {symbol} | regime={regime} | strategy={strategy}", flush=True)
 
     conn.commit()
     conn.close()
-    print(f"[STATE UPDATE] {symbol} | regime={regime} | strategy={strategy}", flush=True)
+    
+
 def get_state():
     conn = get_conn()
     cur = conn.cursor()
@@ -48,7 +52,7 @@ def get_state():
             "position": r[4],
             "timestamp": r[5].isoformat()
         }
-
+    conn.close()
     return {
         "assets": assets,
         "last_update": datetime.utcnow().isoformat()

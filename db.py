@@ -22,16 +22,13 @@ def init_db():
     """)
 
     cur.execute("""
-    CREATE TABLE IF NOT EXISTS trades (
-        id SERIAL PRIMARY KEY,
-        symbol TEXT,
-        entry FLOAT,
-        exit FLOAT,
-        pnl FLOAT,
-        regime TEXT DEFAULT 'unknown',
-        reason TEXT DEFAULT '',
-        confidence FLOAT DEFAULT 0,
-        timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    CREATE TABLE IF NOT EXISTS asset_state (
+        symbol TEXT PRIMARY KEY,
+        regime TEXT,
+        strategy TEXT,
+        signal JSONB,
+        position JSONB,
+        updated_at TIMESTAMP
     )
     """)
     cur.execute("ALTER TABLE positions ADD COLUMN IF NOT EXISTS direction TEXT DEFAULT 'LONG'")

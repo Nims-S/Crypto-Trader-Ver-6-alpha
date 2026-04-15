@@ -34,7 +34,11 @@ def init_db():
         timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
     """)
+    cur.execute("ALTER TABLE positions ADD COLUMN IF NOT EXISTS direction TEXT DEFAULT 'LONG'")
+    cur.execute("ALTER TABLE positions ADD COLUMN IF NOT EXISTS tp1_hit BOOLEAN DEFAULT FALSE")
+    cur.execute("ALTER TABLE positions ADD COLUMN IF NOT EXISTS tp2_hit BOOLEAN DEFAULT FALSE")
 
+    
     migration_columns = [
         ("positions", "regime", "TEXT DEFAULT 'unknown'"),
         ("positions", "confidence", "FLOAT DEFAULT 0"),

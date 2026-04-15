@@ -146,7 +146,15 @@ def run_bot():
                     )
 
                     if size and size > 0:
-                        open_position(cur, symbol, price, size, deployed, signal)
+                        open_position(
+                            cur,
+                            symbol,
+                            price,
+                            size,
+                            deployed,
+                            direction=signal.side,
+                            regime=signal.regime,
+                        )
 
                         # ✅ ADD THIS BLOCK RIGHT AFTER OPEN_POSITION
                         update_asset(

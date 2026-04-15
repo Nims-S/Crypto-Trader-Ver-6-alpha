@@ -110,12 +110,14 @@ def run_bot():
 
                 position_data = None
                 if pos:
+                    # Based on your CREATE TABLE positions in db.py:
+                    # 0:symbol, 1:entry, 2:sl, 3:tp, 4:size
                     position_data = {
-                        "entry_price": pos[2],
-                        "size": pos[3],
-                        "stop_loss": pos[4],
-                        "take_profit": pos[5]
-                    }
+                    "entry_price": pos[1], 
+                    "stop_loss": pos[2],   
+                    "take_profit": pos[3], 
+                    "size": pos[4]         
+                }
 
                 update_asset(
                     symbol=symbol,
@@ -154,6 +156,7 @@ def run_bot():
                             deployed,
                             direction=signal.side,
                             regime=signal.regime,
+                            atr=getattr(signal, "atr", None)
                         )
 
                         # ✅ ADD THIS BLOCK RIGHT AFTER OPEN_POSITION

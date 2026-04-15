@@ -95,14 +95,31 @@ def run_bot():
                 if price is None or price <= 0:
                     continue
 
+                cur.execute("SELECT * FROM positions WHERE symbol=%s", (symbol,))
+                pos = cur.fetchone()
+
+                if pos:
+                    manage_position(cur, symbol, pos, price)
+                    cur.execute("SELECT * FROM positions WHERE symbol=%s", (symbol,))
+                    pos = cur.fetchone()
+
                 df = fetch_historical_data(symbol)
                 if df.empty:
+                    update_asset(
+                        symbol=symbol,
+                        regime="unknown",
+                        strategy="data_unavailable",
+                        signal=None,
+                        position={
+                            "entry_price": pos[1],
+                            "stop_loss": pos[2],
+                            "take_profit": pos[3],
+                            "size": pos[4],
+                        } if pos else None,
+                    )
                     continue
 
                 signal = generate_signal(symbol, df)
-
-                cur.execute("SELECT * FROM positions WHERE symbol=%s", (symbol,))
-                pos = cur.fetchone()
 
                 # ✅ ADD THIS BLOCK RIGHT HERE
                 strategy_name = getattr(signal, "strategy", "unknown") if signal else "none"
@@ -179,9 +196,6 @@ def run_bot():
                         # ✅ ADD THESE BACK
                         last_trade_time[symbol] = now
                         active_trades += 1
-                elif pos:
-                    manage_position(cur, symbol, pos, price)
-            
             conn.commit()
             try:
                 push_to_caffeine(get_state())

@@ -3,7 +3,7 @@ from datetime import datetime
 import json
 from db import get_conn
 
-
+print("✅ STATE.PY LOADED", flush=True)
 STATE = {
     "last_update": None,
     "assets": {}
@@ -26,8 +26,8 @@ def update_asset(symbol, regime, strategy, signal=None, position=None):
         symbol,
         regime,
         strategy,
-        json.dumps(signal),
-        json.dumps(position)
+        json.dumps(signal, default=str) if signal else None,
+        json.dumps(position, default=str) if position else None
     ))
     print(f"[STATE UPDATE] {symbol} | regime={regime} | strategy={strategy}", flush=True)
 

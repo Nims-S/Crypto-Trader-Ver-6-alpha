@@ -60,16 +60,7 @@ def run_bot():
             conn = get_conn()
             cur = conn.cursor()
 
-            # Prevent multiple bot instances from trading at the same time.
-            cur.execute("SELECT pg_try_advisory_lock(12345)")
-            locked = cur.fetchone()[0]
-            if not locked:
-                print("[SKIP] Another instance has the lock.", flush=True)
-                conn.close()
-                conn = None
-                time.sleep(10)
-                continue
-
+           
             total_cap = get_dynamic_capital(cur, CAPITAL)
             allowed, reason = risk_gate(cur, total_cap)
             if not allowed:

@@ -19,6 +19,8 @@ def _insert_trade(cur, symbol, entry, exit_price, pnl, regime="unknown", reason=
     )
 
 def open_position(cur, symbol, price, size, deployed_capital, direction="LONG", atr=None, regime="bull", confidence=0):
+    # ... inside the function, use 'confidence' in the cur.execute tuple ...
+    (symbol, price, round(sl, 4), round(tp1, 4), size, direction, regime, confidence)
     """Calculates SL/TP and saves a new position to the DB."""
     direction = (direction or "LONG").upper()
     regime = regime or "unknown"

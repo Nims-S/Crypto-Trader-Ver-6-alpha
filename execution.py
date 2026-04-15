@@ -32,7 +32,7 @@ def _insert_trade(cur, symbol, entry, exit_price, pnl, regime="unknown", reason=
 #  Open position
 # ─────────────────────────────────────────────
 
-DB schema in db.py:
+#DB schema in db.py:
       positions(symbol, entry, sl, tp, size, regime, confidence, updated_at, direction, tp1_hit, tp2_hit)
     """
     direction = (direction or "LONG").upper()

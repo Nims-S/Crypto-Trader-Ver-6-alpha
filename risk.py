@@ -29,7 +29,7 @@ def risk_gate(cur, total_capital):
         return False, "Weekly loss limit reached"
     return True, "OK"
 
-def calculate_position(symbol, price, total_cap, stop_loss_pct=0.005, confidence=0.5):
+def calculate_position(symbol, price, total_cap, stop_loss_pct=0.005, confidence=0.5, regime_multiplier=1.0):
     """
     Size using the stricter of:
     1) allocation cap
@@ -37,7 +37,9 @@ def calculate_position(symbol, price, total_cap, stop_loss_pct=0.005, confidence
     """
     ratio = ALLOCATION.get(symbol, 0.33)
     notional_cap = total_cap * ratio
-    risk_budget = total_cap * RISK * max(0.5, min(1.25, confidence))
+    confidence_multiplier = max(0.5, min(1.25, confidence))
+    regime_multiplier = max(0.5, min(1.5, float(regime_multiplier or 1.0)))
+    risk_budget = total_cap * RISK * confidence_multiplier * regime_multiplier
 
     stop_distance = max(price * float(stop_loss_pct), price * 0.0025)
     risk_based_size = risk_budget / stop_distance

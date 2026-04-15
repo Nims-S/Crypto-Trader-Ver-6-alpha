@@ -13,11 +13,17 @@ class Regime(str, Enum):
 class TradeSignal:
     symbol: str
     side: str              # "LONG" or "FLAT"
+    strategy: str
     regime: str
     confidence: float
     reason: str
     stop_loss_pct: float
     take_profit_pct: float
+    secondary_take_profit_pct: float
+    trail_pct: float
+    size_multiplier: float
+    tp1_close_fraction: float
+    tp2_close_fraction: float
 
 def compute_indicators(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
@@ -97,11 +103,17 @@ def generate_signal(symbol: str, df: pd.DataFrame):
             return TradeSignal(
                 symbol=symbol,
                 side="LONG",
+                strategy="trend_follow",
                 regime=regime.value,
                 confidence=0.78,
                 reason="Trend alignment with volume confirmation",
                 stop_loss_pct=max(0.0045, float(row["atr_pct"]) * 1.2),
                 take_profit_pct=max(0.010, float(row["atr_pct"]) * 2.2),
+                secondary_take_profit_pct=max(0.018, float(row["atr_pct"]) * 3.4),
+                trail_pct=max(0.007, float(row["atr_pct"]) * 1.4),
+                size_multiplier=1.15,
+                tp1_close_fraction=0.35,
+                tp2_close_fraction=0.50,
             )
         return None
 
@@ -111,11 +123,17 @@ def generate_signal(symbol: str, df: pd.DataFrame):
             return TradeSignal(
                 symbol=symbol,
                 side="LONG",
+                strategy="breakout_momentum",
                 regime=regime.value,
                 confidence=0.73,
                 reason="Breakout above 20-bar high with volume expansion",
                 stop_loss_pct=max(0.005, float(row["atr_pct"]) * 1.1),
                 take_profit_pct=max(0.012, float(row["atr_pct"]) * 2.0),
+                secondary_take_profit_pct=max(0.022, float(row["atr_pct"]) * 3.0),
+                trail_pct=max(0.006, float(row["atr_pct"]) * 1.1),
+                size_multiplier=1.05,
+                tp1_close_fraction=0.45,
+                tp2_close_fraction=0.60,
             )
         return None
 
@@ -125,11 +143,17 @@ def generate_signal(symbol: str, df: pd.DataFrame):
             return TradeSignal(
                 symbol=symbol,
                 side="LONG",
+                strategy="range_reversion",
                 regime=regime.value,
                 confidence=0.64,
                 reason="Range mean reversion at lower band",
                 stop_loss_pct=max(0.004, float(row["atr_pct"]) * 0.9),
                 take_profit_pct=max(0.008, float(row["atr_pct"]) * 1.6),
+                secondary_take_profit_pct=max(0.012, float(row["atr_pct"]) * 2.1),
+                trail_pct=max(0.004, float(row["atr_pct"]) * 0.8),
+                size_multiplier=0.85,
+                tp1_close_fraction=0.50,
+                tp2_close_fraction=0.75,
             )
         return None
 
@@ -139,11 +163,17 @@ def generate_signal(symbol: str, df: pd.DataFrame):
             return TradeSignal(
                 symbol=symbol,
                 side="LONG",
+                strategy="chop_bounce",
                 regime=regime.value,
                 confidence=0.58,
                 reason="Chop filter oversold bounce",
                 stop_loss_pct=max(0.004, float(row["atr_pct"]) * 0.8),
                 take_profit_pct=max(0.007, float(row["atr_pct"]) * 1.4),
+                secondary_take_profit_pct=max(0.010, float(row["atr_pct"]) * 1.9),
+                trail_pct=max(0.0035, float(row["atr_pct"]) * 0.7),
+                size_multiplier=0.70,
+                tp1_close_fraction=0.55,
+                tp2_close_fraction=0.80,
             )
         return None
 

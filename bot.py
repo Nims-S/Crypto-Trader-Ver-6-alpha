@@ -1,17 +1,18 @@
 import time
 from datetime import datetime
-from caffeine import push_to_caffeine
-from state import get_state
-import pandas as pd
-import ccxt
 
-from price_feed import feeds
+import ccxt
+import pandas as pd
+
+from caffeine import push_to_caffeine
+from config import CAPITAL, CANDLE_LIMIT, DEFAULT_TIMEFRAME, MAX_COOLDOWN_SECONDS, MAX_POSITIONS, SYMBOLS
 from db import get_conn
-from config import SYMBOLS, CAPITAL, MAX_COOLDOWN_SECONDS, CANDLE_LIMIT, DEFAULT_TIMEFRAME, MAX_POSITIONS
-from strategy import generate_signal, compute_indicators
+from execution import manage_position, open_position
+from price_feed import feeds
 from risk import calculate_position, get_dynamic_capital, risk_gate
-from execution import open_position, manage_position
-from state import update_asset
+from state import get_state, update_asset
+from strategy import compute_indicators, generate_signal
+
 exchange = ccxt.binance({
     "enableRateLimit": True,
     "timeout": 15000,
@@ -24,10 +25,7 @@ except Exception as e:
 
 
 def fetch_historical_data(symbol: str) -> pd.DataFrame:
-    """
-    Fetch historical candles for a CCXT symbol like 'BTC/USDT'.
-    Returns an indicator-enriched DataFrame or an empty DataFrame on failure.
-    """
+    """Fetch historical candles and return an indicator-enriched DataFrame."""
     try:
         bars = exchange.fetch_ohlcv(symbol, timeframe=DEFAULT_TIMEFRAME, limit=CANDLE_LIMIT)
         if not bars:
@@ -39,19 +37,70 @@ def fetch_historical_data(symbol: str) -> pd.DataFrame:
         )
         df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms", utc=True)
         return compute_indicators(df)
-
     except Exception as e:
         print(f"[FETCH ERROR] {symbol}: {e}", flush=True)
         return pd.DataFrame()
 
 
+def load_position(cur, symbol):
+    cur.execute(
+        """
+        SELECT
+            symbol, entry, sl, tp, tp2, size, regime, confidence, direction,
+            tp1_hit, tp2_hit, strategy, stop_loss_pct, take_profit_pct,
+            secondary_take_profit_pct, trail_pct, tp1_close_fraction, tp2_close_fraction
+        FROM positions
+        WHERE symbol=%s
+        """,
+        (symbol,),
+    )
+    row = cur.fetchone()
+    if not row:
+        return None
+
+    return {
+        "symbol": row[0],
+        "entry": row[1],
+        "sl": row[2],
+        "tp": row[3],
+        "tp2": row[4],
+        "size": row[5],
+        "regime": row[6],
+        "confidence": row[7],
+        "direction": row[8],
+        "tp1_hit": row[9],
+        "tp2_hit": row[10],
+        "strategy": row[11],
+        "stop_loss_pct": row[12],
+        "take_profit_pct": row[13],
+        "secondary_take_profit_pct": row[14],
+        "trail_pct": row[15],
+        "tp1_close_fraction": row[16],
+        "tp2_close_fraction": row[17],
+    }
+
+
+def build_position_state(position):
+    if not position:
+        return None
+
+    return {
+        "entry_price": position["entry"],
+        "stop_loss": position["sl"],
+        "take_profit": position["tp"],
+        "take_profit_2": position["tp2"],
+        "size": position["size"],
+        "strategy": position["strategy"],
+    }
+
+
 def run_bot():
-    print("🤖 BOT LOOP STARTED (v6 alpha)", flush=True)
+    print("[BOT] LOOP STARTED (v6 alpha)", flush=True)
     last_trade_time = {}
 
     while True:
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        print(f"❤️ [HEARTBEAT] Bot alive at {timestamp}", flush=True)
+        print(f"[HEARTBEAT] Bot alive at {timestamp}", flush=True)
 
         conn = None
         cur = None
@@ -60,7 +109,6 @@ def run_bot():
             conn = get_conn()
             cur = conn.cursor()
 
-           
             total_cap = get_dynamic_capital(cur, CAPITAL)
             allowed, reason = risk_gate(cur, total_cap)
             if not allowed:
@@ -86,13 +134,10 @@ def run_bot():
                 if price is None or price <= 0:
                     continue
 
-                cur.execute("SELECT * FROM positions WHERE symbol=%s", (symbol,))
-                pos = cur.fetchone()
-
-                if pos:
-                    manage_position(cur, symbol, pos, price)
-                    cur.execute("SELECT * FROM positions WHERE symbol=%s", (symbol,))
-                    pos = cur.fetchone()
+                position = load_position(cur, symbol)
+                if position:
+                    manage_position(cur, position, price)
+                    position = load_position(cur, symbol)
 
                 df = fetch_historical_data(symbol)
                 if df.empty:
@@ -101,46 +146,28 @@ def run_bot():
                         regime="unknown",
                         strategy="data_unavailable",
                         signal=None,
-                        position={
-                            "entry_price": pos[1],
-                            "stop_loss": pos[2],
-                            "take_profit": pos[3],
-                            "size": pos[4],
-                        } if pos else None,
+                        position=build_position_state(position),
                     )
                     continue
 
                 signal = generate_signal(symbol, df)
-
-                # ✅ ADD THIS BLOCK RIGHT HERE
-                strategy_name = getattr(signal, "strategy", "unknown") if signal else "none"
+                strategy_name = getattr(signal, "strategy", "none") if signal else "none"
                 regime = getattr(signal, "regime", "unknown") if signal else "unknown"
-
-                position_data = None
-                if pos:
-                    # Based on your CREATE TABLE positions in db.py:
-                    # 0:symbol, 1:entry, 2:sl, 3:tp, 4:size
-                    position_data = {
-                    "entry_price": pos[1], 
-                    "stop_loss": pos[2],   
-                    "take_profit": pos[3], 
-                    "size": pos[4]         
-                }
 
                 update_asset(
                     symbol=symbol,
                     regime=regime,
                     strategy=strategy_name,
                     signal={
-                         "side": signal.side if signal else None,
-                         "confidence": getattr(signal, "confidence", None)
+                        "side": signal.side if signal else None,
+                        "confidence": getattr(signal, "confidence", None),
                     } if signal else None,
-                    position=position_data
+                    position=build_position_state(position),
                 )
-                # ✅ END BLOCK
-                if signal and signal.side == "LONG" and not pos:
+
+                if signal and signal.side == "LONG" and not position:
                     if active_trades >= MAX_POSITIONS:
-                        print(f"⚠️ Max positions reached. Skipping {symbol}.", flush=True)
+                        print(f"[SKIP] Max positions reached. Skipping {symbol}.", flush=True)
                         continue
 
                     now = time.time()
@@ -153,41 +180,48 @@ def run_bot():
                         total_cap=total_cap,
                         stop_loss_pct=signal.stop_loss_pct,
                         confidence=signal.confidence,
+                        regime_multiplier=signal.size_multiplier,
                     )
 
                     if size and size > 0:
                         open_position(
-                            cur,
-                            symbol,
-                            price,
-                            size,
-                            deployed,
+                            cur=cur,
+                            symbol=symbol,
+                            price=price,
+                            size=size,
+                            deployed_capital=deployed,
                             direction=signal.side,
                             regime=signal.regime,
-                            atr=getattr(signal, "atr", None),
+                            strategy=signal.strategy,
+                            stop_loss_pct=signal.stop_loss_pct,
+                            take_profit_pct=signal.take_profit_pct,
+                            secondary_take_profit_pct=signal.secondary_take_profit_pct,
+                            trail_pct=signal.trail_pct,
+                            tp1_close_fraction=signal.tp1_close_fraction,
+                            tp2_close_fraction=signal.tp2_close_fraction,
                             confidence=signal.confidence,
                         )
 
-                        # ✅ ADD THIS BLOCK RIGHT AFTER OPEN_POSITION
                         update_asset(
                             symbol=symbol,
-                            regime=regime,
-                            strategy=strategy_name,
+                            regime=signal.regime,
+                            strategy=signal.strategy,
                             signal={
-                                 "side": "LONG",
-                                 "confidence": signal.confidence
+                                "side": signal.side,
+                                "confidence": signal.confidence,
                             },
                             position={
                                 "entry_price": price,
+                                "stop_loss": round(price * (1 - signal.stop_loss_pct), 4),
+                                "take_profit": round(price * (1 + signal.take_profit_pct), 4),
+                                "take_profit_2": round(price * (1 + signal.secondary_take_profit_pct), 4),
                                 "size": size,
-                                "stop_loss": signal.stop_loss_pct,
-                                "take_profit": getattr(signal, "take_profit", None)
-                            }
+                                "strategy": signal.strategy,
+                            },
                         )
-                        # ✅ END ADD  
-                        # ✅ ADD THESE BACK
                         last_trade_time[symbol] = now
                         active_trades += 1
+
             conn.commit()
             try:
                 push_to_caffeine(get_state())
@@ -200,7 +234,6 @@ def run_bot():
                 except Exception:
                     pass
             print(f"[CRITICAL ERROR] {e}", flush=True)
-
         finally:
             if cur:
                 try:

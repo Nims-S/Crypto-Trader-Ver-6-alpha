@@ -1,12 +1,5 @@
 from utils import send_telegram
 
-# Configuration
-TP_TIERS = [
-    (0.0075, 0.33),   # TP1: +0.75% → close 33%, move SL to break-even
-    (0.020,  0.33),   # TP2: +2.0%  → close another 33%
-]
-TRAIL_PCT_BULL = 0.010   # 1.0% trail in bull
-TRAIL_PCT_BEAR = 0.005   # 0.5% trail for shorts in bear
 
 def _insert_trade(cur, symbol, entry, exit_price, pnl, regime="unknown", reason="", confidence=0):
     """Inserts a completed trade into the history table."""
@@ -18,120 +11,172 @@ def _insert_trade(cur, symbol, entry, exit_price, pnl, regime="unknown", reason=
         (symbol, entry, exit_price, round(pnl, 2), regime, reason, confidence),
     )
 
-def open_position(cur, symbol, price, size, deployed_capital, direction="LONG", atr=None, regime="bull", confidence=0):
-    # ... inside the function, use 'confidence' in the cur.execute tuple ...
-    (symbol, price, round(sl, 4), round(tp1, 4), size, direction, regime, confidence)
-    """Calculates SL/TP and saves a new position to the DB."""
+
+def _price_from_pct(entry, pct, is_long):
+    if is_long:
+        return entry * (1 + pct)
+    return entry * (1 - pct)
+
+
+def _sl_from_pct(entry, pct, is_long):
+    if is_long:
+        return entry * (1 - pct)
+    return entry * (1 + pct)
+
+
+def open_position(
+    cur,
+    symbol,
+    price,
+    size,
+    deployed_capital,
+    direction="LONG",
+    regime="bull",
+    strategy="unknown",
+    stop_loss_pct=0.005,
+    take_profit_pct=0.01,
+    secondary_take_profit_pct=0.02,
+    trail_pct=0.005,
+    tp1_close_fraction=0.33,
+    tp2_close_fraction=0.5,
+    confidence=0,
+):
+    """Calculates regime-specific SL/TP levels and saves a new position to the DB."""
     direction = (direction or "LONG").upper()
     regime = regime or "unknown"
+    strategy = strategy or "unknown"
+    is_long = direction == "LONG"
 
-    # Use ATR for SL if available, otherwise 0.5% default
-    sl_offset = (atr * 2.0) if (atr and atr > 0) else (price * 0.005)
+    sl = _sl_from_pct(price, float(stop_loss_pct or 0), is_long)
+    tp1 = _price_from_pct(price, float(take_profit_pct or 0), is_long)
+    tp2 = _price_from_pct(price, float(secondary_take_profit_pct or 0), is_long)
 
-    if direction == "LONG":
-        sl = price - sl_offset
-        tp1 = price * (1 + TP_TIERS[0][0])
-    else:
-        sl = price + sl_offset
-        tp1 = price * (1 - TP_TIERS[0][0])
-
-    # Corrected INSERT: Matches the 10 columns in your DB schema
     cur.execute(
         """
-        INSERT INTO positions (symbol, entry, sl, tp, size, direction, regime, confidence, tp1_hit, tp2_hit)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, FALSE, FALSE)
+        INSERT INTO positions (
+            symbol, entry, sl, tp, tp2, size, direction, regime, confidence,
+            strategy, stop_loss_pct, take_profit_pct, secondary_take_profit_pct,
+            trail_pct, tp1_close_fraction, tp2_close_fraction, tp1_hit, tp2_hit
+        )
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, FALSE, FALSE)
         ON CONFLICT (symbol) DO UPDATE SET
             entry = EXCLUDED.entry,
             sl = EXCLUDED.sl,
             tp = EXCLUDED.tp,
+            tp2 = EXCLUDED.tp2,
             size = EXCLUDED.size,
             direction = EXCLUDED.direction,
             regime = EXCLUDED.regime,
             confidence = EXCLUDED.confidence,
+            strategy = EXCLUDED.strategy,
+            stop_loss_pct = EXCLUDED.stop_loss_pct,
+            take_profit_pct = EXCLUDED.take_profit_pct,
+            secondary_take_profit_pct = EXCLUDED.secondary_take_profit_pct,
+            trail_pct = EXCLUDED.trail_pct,
+            tp1_close_fraction = EXCLUDED.tp1_close_fraction,
+            tp2_close_fraction = EXCLUDED.tp2_close_fraction,
             tp1_hit = FALSE,
             tp2_hit = FALSE,
             updated_at = CURRENT_TIMESTAMP
         """,
-        (symbol, price, round(sl, 4), round(tp1, 4), size, direction, regime, float(confidence or 0)),
+        (
+            symbol,
+            price,
+            round(sl, 4),
+            round(tp1, 4),
+            round(tp2, 4),
+            size,
+            direction,
+            regime,
+            float(confidence or 0),
+            strategy,
+            float(stop_loss_pct or 0),
+            float(take_profit_pct or 0),
+            float(secondary_take_profit_pct or 0),
+            float(trail_pct or 0),
+            float(tp1_close_fraction or 0.33),
+            float(tp2_close_fraction or 0.5),
+        ),
     )
 
-    arrow = "↑" if direction == "LONG" else "↓"
+    arrow = "↑" if is_long else "↓"
     msg = (
-        f"{arrow} <b>{symbol} {direction}</b> [{regime.upper()}]\n\n"
+        f"{arrow} <b>{symbol} {direction}</b> [{regime.upper()} / {strategy}]\n\n"
         f"💰 <b>Deployed:</b> ${deployed_capital:.2f}\n"
         f"📍 <b>Entry:</b> {price:.4f}\n"
         f"🛑 <b>SL:</b> {sl:.4f}\n"
-        f"🎯 <b>TP1:</b> {tp1:.4f}"
+        f"🎯 <b>TP1:</b> {tp1:.4f}\n"
+        f"🚀 <b>TP2:</b> {tp2:.4f}"
     )
     send_telegram(msg)
 
-def manage_position(cur, symbol, pos, price):
-    """
-    Manages TP/SL logic based on the 'pos' tuple from SELECT * FROM positions.
-    Indices based on db.py: 0:sym, 1:entry, 2:sl, 3:tp, 4:size, 5:regime, 6:conf, 8:dir, 9:tp1, 10:tp2
-    """
+
+def manage_position(cur, position, price):
+    """Manages exits using the stored strategy-specific settings on the position."""
+    symbol = position["symbol"]
     try:
-        entry = float(pos[1])
-        sl = float(pos[2])
-        size = float(pos[4])
-        regime = pos[5] if pos[5] else "unknown"
-        confidence = float(pos[6] or 0)
-        direction = pos[8] if pos[8] else "LONG"
-        tp1_hit = bool(pos[9])
-        tp2_hit = bool(pos[10])
-        
-        is_long = (direction.upper() == "LONG")
+        entry = float(position["entry"])
+        sl = float(position["sl"])
+        tp1 = float(position["tp"])
+        tp2 = float(position["tp2"] or 0)
+        size = float(position["size"])
+        regime = position.get("regime") or "unknown"
+        strategy = position.get("strategy") or "unknown"
+        confidence = float(position.get("confidence") or 0)
+        direction = position.get("direction") or "LONG"
+        tp1_hit = bool(position.get("tp1_hit"))
+        tp2_hit = bool(position.get("tp2_hit"))
+        trail_pct = float(position.get("trail_pct") or 0)
+        tp1_close_fraction = float(position.get("tp1_close_fraction") or 0.33)
+        tp2_close_fraction = float(position.get("tp2_close_fraction") or 0.5)
+
+        is_long = direction.upper() == "LONG"
         unit_profit = (price - entry) if is_long else (entry - price)
 
-        # 1. Handle TP1 (Move SL to Break Even)
         if not tp1_hit:
-            tp1_price = entry * (1 + TP_TIERS[0][0]) if is_long else entry * (1 - TP_TIERS[0][0])
-            hit_tp1 = (price >= tp1_price) if is_long else (price <= tp1_price)
-            
+            hit_tp1 = (price >= tp1) if is_long else (price <= tp1)
             if hit_tp1:
-                close_size = round(size * TP_TIERS[0][1], 6)
+                close_size = min(size, round(size * tp1_close_fraction, 6))
                 remaining = round(size - close_size, 6)
-                # Move SL to entry (Break Even)
                 cur.execute(
                     "UPDATE positions SET sl=%s, size=%s, tp1_hit=TRUE, updated_at=CURRENT_TIMESTAMP WHERE symbol=%s",
                     (entry, remaining, symbol),
                 )
-                _insert_trade(cur, symbol, entry, price, (unit_profit * close_size), regime, "TP1", confidence)
+                _insert_trade(cur, symbol, entry, price, unit_profit * close_size, regime, f"{strategy}:TP1", confidence)
                 send_telegram(f"⚡ {symbol} TP1 @ {price:.4f} | SL moved to Entry (BE)")
                 return
 
-        # 2. Handle TP2
-        if tp1_hit and not tp2_hit:
-            tp2_price = entry * (1 + TP_TIERS[1][0]) if is_long else entry * (1 - TP_TIERS[1][0])
-            hit_tp2 = (price >= tp2_price) if is_long else (price <= tp2_price)
-            
+        if tp1_hit and not tp2_hit and tp2 > 0:
+            hit_tp2 = (price >= tp2) if is_long else (price <= tp2)
             if hit_tp2:
-                # Calculate relative size to close another 33% of original
-                close_size = min(size, round(size * 0.5, 6)) # Approx remaining relative half
+                close_size = min(size, round(size * tp2_close_fraction, 6))
                 remaining = round(size - close_size, 6)
-                
                 if remaining <= 1e-8:
                     cur.execute("DELETE FROM positions WHERE symbol=%s", (symbol,))
                 else:
-                    cur.execute("UPDATE positions SET size=%s, tp2_hit=TRUE WHERE symbol=%s", (remaining, symbol))
-                
-                _insert_trade(cur, symbol, entry, price, (unit_profit * close_size), regime, "TP2", confidence)
+                    cur.execute(
+                        "UPDATE positions SET size=%s, tp2_hit=TRUE, updated_at=CURRENT_TIMESTAMP WHERE symbol=%s",
+                        (remaining, symbol),
+                    )
+
+                _insert_trade(cur, symbol, entry, price, unit_profit * close_size, regime, f"{strategy}:TP2", confidence)
                 send_telegram(f"🎯 {symbol} TP2 @ {price:.4f} | Partial Exit")
                 return
 
-        # 3. Trailing Stop Logic (Only if in profit)
-        trail_pct = TRAIL_PCT_BULL if is_long else TRAIL_PCT_BEAR
-        if unit_profit > 0:
+        if unit_profit > 0 and trail_pct > 0:
             trail_sl = (price * (1 - trail_pct)) if is_long else (price * (1 + trail_pct))
             if (is_long and trail_sl > sl) or (not is_long and trail_sl < sl):
-                cur.execute("UPDATE positions SET sl=%s WHERE symbol=%s", (round(trail_sl, 4), symbol))
+                cur.execute(
+                    "UPDATE positions SET sl=%s, updated_at=CURRENT_TIMESTAMP WHERE symbol=%s",
+                    (round(trail_sl, 4), symbol),
+                )
+                sl = trail_sl
 
-        # 4. Final Stop Loss (Hit SL)
         hit_sl = (price <= sl) if is_long else (price >= sl)
         if hit_sl:
             pnl = unit_profit * size
             cur.execute("DELETE FROM positions WHERE symbol=%s", (symbol,))
-            _insert_trade(cur, symbol, entry, price, pnl, regime, "SL_HIT", confidence)
+            _insert_trade(cur, symbol, entry, price, pnl, regime, f"{strategy}:SL_HIT", confidence)
             emoji = "✅" if pnl > 0 else "❌"
             send_telegram(f"{emoji} {symbol} EXIT @ {price:.4f} | PnL: ${pnl:.2f}")
 

@@ -37,12 +37,28 @@ def init_db():
     cur.execute("ALTER TABLE positions ADD COLUMN IF NOT EXISTS direction TEXT DEFAULT 'LONG'")
     cur.execute("ALTER TABLE positions ADD COLUMN IF NOT EXISTS tp1_hit BOOLEAN DEFAULT FALSE")
     cur.execute("ALTER TABLE positions ADD COLUMN IF NOT EXISTS tp2_hit BOOLEAN DEFAULT FALSE")
+    cur.execute("ALTER TABLE positions ADD COLUMN IF NOT EXISTS tp2 FLOAT")
+    cur.execute("ALTER TABLE positions ADD COLUMN IF NOT EXISTS strategy TEXT DEFAULT 'unknown'")
+    cur.execute("ALTER TABLE positions ADD COLUMN IF NOT EXISTS stop_loss_pct FLOAT DEFAULT 0")
+    cur.execute("ALTER TABLE positions ADD COLUMN IF NOT EXISTS take_profit_pct FLOAT DEFAULT 0")
+    cur.execute("ALTER TABLE positions ADD COLUMN IF NOT EXISTS secondary_take_profit_pct FLOAT DEFAULT 0")
+    cur.execute("ALTER TABLE positions ADD COLUMN IF NOT EXISTS trail_pct FLOAT DEFAULT 0")
+    cur.execute("ALTER TABLE positions ADD COLUMN IF NOT EXISTS tp1_close_fraction FLOAT DEFAULT 0.33")
+    cur.execute("ALTER TABLE positions ADD COLUMN IF NOT EXISTS tp2_close_fraction FLOAT DEFAULT 0.5")
 
     
     migration_columns = [
         ("positions", "regime", "TEXT DEFAULT 'unknown'"),
         ("positions", "confidence", "FLOAT DEFAULT 0"),
         ("positions", "updated_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"),
+        ("positions", "tp2", "FLOAT"),
+        ("positions", "strategy", "TEXT DEFAULT 'unknown'"),
+        ("positions", "stop_loss_pct", "FLOAT DEFAULT 0"),
+        ("positions", "take_profit_pct", "FLOAT DEFAULT 0"),
+        ("positions", "secondary_take_profit_pct", "FLOAT DEFAULT 0"),
+        ("positions", "trail_pct", "FLOAT DEFAULT 0"),
+        ("positions", "tp1_close_fraction", "FLOAT DEFAULT 0.33"),
+        ("positions", "tp2_close_fraction", "FLOAT DEFAULT 0.5"),
         ("trades", "regime", "TEXT DEFAULT 'unknown'"),
         ("trades", "reason", "TEXT DEFAULT ''"),
         ("trades", "confidence", "FLOAT DEFAULT 0"),

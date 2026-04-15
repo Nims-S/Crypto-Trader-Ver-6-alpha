@@ -207,7 +207,7 @@ def background_executor():
         conn = get_conn()
         cur = conn.cursor()
 
-        cur.execute("SELECT pg_try_advisory_lock(99999)")
+        cur.execute("SELECT pg_try_advisory_lock(12345)")
         if not cur.fetchone()[0]:
             print("⚠️ Another bot instance is already running. Skipping start.", flush=True)
             return
@@ -239,11 +239,13 @@ def start_background_executor_once():
         BOT_THREAD_STARTED = True
 
 
-@app.before_request
-def ensure_background_executor_started():
-    start_background_executor_once()
+# Remove the @app.before_request block entirely
 
 if __name__ == "__main__":
+    # This only runs if you run 'python main.py' locally
     start_background_executor_once()
     port = int(os.environ.get("PORT", PORT))
     app.run(host="0.0.0.0", port=port)
+else:
+    # This runs when Gunicorn imports the file
+    start_background_executor_once()

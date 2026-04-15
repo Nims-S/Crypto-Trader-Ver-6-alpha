@@ -151,9 +151,8 @@ def run_bot():
                     continue
 
                 signal = generate_signal(symbol, df)
-                strategy_name = getattr(signal, "strategy", "none") if signal else "none"
-                regime = getattr(signal, "regime", "unknown") if signal else "unknown"
-
+                strategy_name = signal.strategy
+                regime = signal.regime
                 update_asset(
                     symbol=symbol,
                     regime=regime,

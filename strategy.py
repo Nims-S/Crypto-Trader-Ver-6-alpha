@@ -25,6 +25,23 @@ class TradeSignal:
     tp1_close_fraction: float
     tp2_close_fraction: float
 
+def no_trade_signal(symbol, regime, reason="No valid setup"):
+    return TradeSignal(
+        symbol=symbol,
+        side="FLAT",
+        strategy="no_trade",
+        regime=regime.value if hasattr(regime, "value") else str(regime),
+        confidence=0.0,
+        reason=reason,
+        stop_loss_pct=0.0,
+        take_profit_pct=0.0,
+        secondary_take_profit_pct=0.0,
+        trail_pct=0.0,
+        size_multiplier=0.0,
+        tp1_close_fraction=0.0,
+        tp2_close_fraction=0.0,
+    )
+
 def compute_indicators(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     if df.empty:
@@ -88,14 +105,14 @@ def detect_regime(row) -> Regime:
 
 def generate_signal(symbol: str, df: pd.DataFrame):
     if df.empty:
-        return None
+        return no_trade_signal(symbol, "unknown", "Empty dataframe")
 
     row = df.iloc[-1]
     regime = detect_regime(row)
 
     # Risk-first: long only, because the current live stack is spot-oriented.
     if regime == Regime.HIGH_VOL:
-        return None
+        return no_trade_signal(symbol, regime, "High volatility filter")
 
     # Trend-following: buy only when momentum agrees.
     if regime == Regime.TREND:
@@ -115,7 +132,7 @@ def generate_signal(symbol: str, df: pd.DataFrame):
                 tp1_close_fraction=0.35,
                 tp2_close_fraction=0.50,
             )
-        return None
+        return no_trade_signal(symbol, regime, "Trend conditions not met")
 
     # Breakout: buy momentum expansion after compression.
     if regime == Regime.BREAKOUT:
@@ -135,7 +152,7 @@ def generate_signal(symbol: str, df: pd.DataFrame):
                 tp1_close_fraction=0.45,
                 tp2_close_fraction=0.60,
             )
-        return None
+        return no_trade_signal(symbol, regime, "Breakout conditions not met")
 
     # Range mean reversion: buy fear near lower band if trend is not broken.
     if regime == Regime.RANGE:
@@ -155,7 +172,7 @@ def generate_signal(symbol: str, df: pd.DataFrame):
                 tp1_close_fraction=0.50,
                 tp2_close_fraction=0.75,
             )
-        return None
+        return no_trade_signal(symbol, regime, "Range conditions not met")
 
     # Chop: very selective, only if oversold with decent structure.
     if regime == Regime.CHOP:
@@ -175,6 +192,6 @@ def generate_signal(symbol: str, df: pd.DataFrame):
                 tp1_close_fraction=0.55,
                 tp2_close_fraction=0.80,
             )
-        return None
+        return no_trade_signal(symbol, regime, "Chop conditions not met")
 
-    return None
+    return no_trade_signal(symbol, regime, "No matching regime logic")

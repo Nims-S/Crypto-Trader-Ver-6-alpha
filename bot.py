@@ -151,8 +151,8 @@ def run_bot():
                     continue
 
                 signal = generate_signal(symbol, df)
-                strategy_name = signal.strategy
-                regime = signal.regime
+                strategy_name = signal.strategy if signal else "none"
+                regime = signal.regime if signal else "unknown
                 update_asset(
                     symbol=symbol,
                     regime=regime,
@@ -223,7 +223,10 @@ def run_bot():
 
             conn.commit()
             try:
-                push_to_caffeine(get_state())
+                state = get_state()
+
+                if state.get("assets"):  # avoid empty spam
+                    push_to_caffeine(state)
             except Exception as e:
                 print(f"[CAFFEINE LOOP ERROR] {e}", flush=True)
         except Exception as e:

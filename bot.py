@@ -50,7 +50,7 @@ def load_position(cur, symbol):
             tp1_hit, tp2_hit, strategy, stop_loss_pct, take_profit_pct,
             secondary_take_profit_pct, trail_pct, tp1_close_fraction, tp2_close_fraction
         FROM positions
-        WHERE symbol=%s
+        WHERE symbol=%s FOR UPDATE SKIP LOCKED
         """,
         (symbol,),
     )

@@ -9,7 +9,7 @@ from config import CAPITAL, CANDLE_LIMIT, DEFAULT_TIMEFRAME, MAX_COOLDOWN_SECOND
 from db import get_conn
 from execution import manage_position, open_position
 from price_feed import feeds
-from risk import calculate_position, get_dynamic_capital, risk_gate
+from risk import calculate_position, get_dynamic_capital, get_strategy_multiplier, risk_gate
 from state import get_state, update_asset
 from strategy import compute_indicators, generate_signal
 
@@ -152,7 +152,8 @@ def run_bot():
 
                 signal = generate_signal(symbol, df)
                 strategy_name = signal.strategy if signal else "none"
-                regime = signal.regime if signal else "unknown
+                regime = signal.regime if signal else "unknown"
+
                 update_asset(
                     symbol=symbol,
                     regime=regime,
@@ -173,13 +174,15 @@ def run_bot():
                     if symbol in last_trade_time and (now - last_trade_time[symbol] < MAX_COOLDOWN_SECONDS):
                         continue
 
+                    strategy_mult = get_strategy_multiplier(cur, signal.strategy, signal.regime)
+
                     size, deployed = calculate_position(
                         symbol=symbol,
                         price=price,
                         total_cap=total_cap,
                         stop_loss_pct=signal.stop_loss_pct,
                         confidence=signal.confidence,
-                        regime_multiplier=signal.size_multiplier,
+                        regime_multiplier=strategy_mult,
                     )
 
                     if size and size > 0:
@@ -224,11 +227,11 @@ def run_bot():
             conn.commit()
             try:
                 state = get_state()
-
-                if state.get("assets"):  # avoid empty spam
+                if state.get("assets"):
                     push_to_caffeine(state)
             except Exception as e:
                 print(f"[CAFFEINE LOOP ERROR] {e}", flush=True)
+
         except Exception as e:
             if conn:
                 try:

@@ -4,37 +4,38 @@ import threading
 import time
 import os
 import logging
-from flask import request
+
 from bot import run_bot
 from db import init_db, get_conn
-from config import PORT, SYMBOLS, CAPITAL, BOT_VERSION, RESET_TOKEN
+from config import PORT, BOT_VERSION, RESET_TOKEN
 from price_feed import feeds
 from risk import get_dynamic_capital
 from state import get_state
 
-
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
+
 BOT_THREAD_LOCK = threading.Lock()
 BOT_THREAD_STARTED = False
 BOT_THREAD_ENABLED = os.getenv("BOT_THREAD_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
+
+
 class IgnoreCaffeineFilter(logging.Filter):
     def filter(self, record):
         msg = record.getMessage()
 
-        # Ignore caffeine dashboard spam
-        if any(path in msg for path in [
-            "/caffeine/"
-        ]):
-            # BUT allow UptimeRobot
+        # Ignore caffeine dashboard spam, but keep UptimeRobot pings.
+        if "/caffeine/" in msg:
             if "UptimeRobot" in msg:
                 return True
             return False
 
         return True
 
-log = logging.getLogger('werkzeug')
-log.addFilter(IgnoreCaffeineFilter())
+
+logging.getLogger("werkzeug").addFilter(IgnoreCaffeineFilter())
+
+
 def get_positions_from_db():
     conn = None
     try:
@@ -59,9 +60,11 @@ def get_positions_from_db():
         if conn:
             conn.close()
 
+
 @app.route("/")
 def home():
     return jsonify({"status": "running", "engine": f"algobot_{BOT_VERSION}"})
+
 
 @app.route("/positions")
 def positions_view():
@@ -100,15 +103,20 @@ def positions_view():
     finally:
         if conn:
             conn.close()
+
+
 @app.route("/caffeine/state", methods=["GET"])
 def caffeine_state():
     return jsonify(get_state())
+
+
 @app.route("/caffeine/full", methods=["GET"])
 def caffeine_full():
     return jsonify({
         "state": get_state(),
         "positions": get_positions_from_db()
     })
+
 
 @app.route("/risk")
 def risk_report():
@@ -117,7 +125,7 @@ def risk_report():
         conn = get_conn()
         cur = conn.cursor()
 
-        total_cap = get_dynamic_capital(cur, CAPITAL)
+        total_cap = get_dynamic_capital(cur, 100000)
         cur.execute("SELECT symbol, entry, size FROM positions")
         positions = cur.fetchall()
 
@@ -144,6 +152,7 @@ def risk_report():
         if conn:
             conn.close()
 
+
 @app.route("/status")
 def status():
     return jsonify({
@@ -152,6 +161,7 @@ def status():
         "version": BOT_VERSION,
         "server_time": time.time()
     })
+
 
 @app.route("/trades")
 def trades():
@@ -176,6 +186,8 @@ def trades():
     finally:
         if conn:
             conn.close()
+
+
 @app.route("/caffeine/health", methods=["GET"])
 def caffeine_health():
     state = get_state()
@@ -184,13 +196,17 @@ def caffeine_health():
         "last_update": state.get("last_update"),
         "assets_tracked": len(state.get("assets", {}))
     })
+
+
 @app.route("/debug")
 def debug():
     return {"bot": "running", "version": BOT_VERSION}
 
+
 @app.route("/health")
 def health():
     return jsonify({"status": "alive", "version": BOT_VERSION, "server_time": time.time()})
+
 
 @app.route("/reset", methods=["POST"])
 def reset():
@@ -214,6 +230,7 @@ def reset():
     finally:
         if conn:
             conn.close()
+
 
 def background_executor():
     print("⏳ Waiting for web server to stabilize...", flush=True)
@@ -242,6 +259,7 @@ def background_executor():
         if conn:
             conn.close()
 
+
 def start_background_executor_once():
     global BOT_THREAD_STARTED
 
@@ -256,13 +274,9 @@ def start_background_executor_once():
         BOT_THREAD_STARTED = True
 
 
-# Remove the @app.before_request block entirely
-
 if __name__ == "__main__":
-    # This only runs if you run 'python main.py' locally
     start_background_executor_once()
     port = int(os.environ.get("PORT", PORT))
     app.run(host="0.0.0.0", port=port)
 else:
-    # This runs when Gunicorn imports the file
     start_background_executor_once()

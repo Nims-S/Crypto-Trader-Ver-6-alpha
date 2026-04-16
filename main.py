@@ -3,7 +3,8 @@ from flask_cors import CORS
 import threading
 import time
 import os
-
+import logging
+from flask import request
 from bot import run_bot
 from db import init_db, get_conn
 from config import PORT, SYMBOLS, CAPITAL, BOT_VERSION, RESET_TOKEN
@@ -17,7 +18,23 @@ CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
 BOT_THREAD_LOCK = threading.Lock()
 BOT_THREAD_STARTED = False
 BOT_THREAD_ENABLED = os.getenv("BOT_THREAD_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
+class IgnoreCaffeineFilter(logging.Filter):
+    def filter(self, record):
+        msg = record.getMessage()
 
+        # Ignore caffeine dashboard spam
+        if any(path in msg for path in [
+            "/caffeine/"
+        ]):
+            # BUT allow UptimeRobot
+            if "UptimeRobot" in msg:
+                return True
+            return False
+
+        return True
+
+log = logging.getLogger('werkzeug')
+log.addFilter(IgnoreCaffeineFilter())
 def get_positions_from_db():
     conn = None
     try:

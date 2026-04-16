@@ -29,6 +29,36 @@ def risk_gate(cur, total_capital):
         return False, "Weekly loss limit reached"
     return True, "OK"
 
+def get_strategy_multiplier(cur, strategy, regime):
+    try:
+        cur.execute("""
+            SELECT trades, wins, total_pnl
+            FROM strategy_stats
+            WHERE strategy=%s AND regime=%s
+        """, (strategy, regime))
+
+        row = cur.fetchone()
+
+        if not row:
+            return 1.0  # no data yet
+
+        trades, wins, pnl = row
+
+        if trades < 5:
+            return 1.0  # not enough sample
+
+        win_rate = wins / trades
+
+        # 🔥 scaling logic
+        if win_rate > 0.6 and pnl > 0:
+            return 1.25
+        elif win_rate < 0.4:
+            return 0.6
+        else:
+            return 1.0
+
+    except Exception:
+        return 1.0
 def calculate_position(symbol, price, total_cap, stop_loss_pct=0.005, confidence=0.5, regime_multiplier=1.0):
     """
     Size using the stricter of:

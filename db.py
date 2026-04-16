@@ -31,6 +31,17 @@ def init_db():
         updated_at TIMESTAMP
     )
     """)
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS strategy_stats (
+        strategy TEXT,
+        regime TEXT,
+        trades INTEGER DEFAULT 0,
+        wins INTEGER DEFAULT 0,
+        total_pnl FLOAT DEFAULT 0,
+        last_updated TIMESTAMP DEFAULT NOW(),
+        PRIMARY KEY (strategy, regime)
+    )
+    """)
     cur.execute("ALTER TABLE positions ADD COLUMN IF NOT EXISTS direction TEXT DEFAULT 'LONG'")
     cur.execute("ALTER TABLE positions ADD COLUMN IF NOT EXISTS tp1_hit BOOLEAN DEFAULT FALSE")
     cur.execute("ALTER TABLE positions ADD COLUMN IF NOT EXISTS tp2_hit BOOLEAN DEFAULT FALSE")

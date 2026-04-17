@@ -4,13 +4,13 @@ import threading
 import time
 import os
 import logging
-
+from state import get_state, get_controls, set_control
 from bot import run_bot
 from db import init_db, get_conn
 from config import PORT, BOT_VERSION, RESET_TOKEN
 from price_feed import feeds
 from risk import get_dynamic_capital
-from state import get_state
+
 
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
@@ -117,6 +117,29 @@ def caffeine_full():
         "positions": get_positions_from_db()
     })
 
+@app.route("/caffeine/controls", methods=["GET"])
+def caffeine_controls():
+    return jsonify(get_controls())
+
+
+@app.route("/caffeine/controls", methods=["POST"])
+def caffeine_controls_update():
+    data = request.get_json(force=True) or {}
+    scope = data.get("scope", "GLOBAL")
+
+    enabled = data.get("enabled")
+    flatten_on_disable = data.get("flatten_on_disable")
+
+    if enabled is None and flatten_on_disable is None:
+        return jsonify({"error": "nothing to update"}), 400
+
+    set_control(
+        scope=scope,
+        enabled=enabled,
+        flatten_on_disable=flatten_on_disable,
+    )
+
+    return jsonify({"ok": True, "scope": scope})
 
 @app.route("/risk")
 def risk_report():

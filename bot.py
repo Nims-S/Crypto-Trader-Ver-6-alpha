@@ -135,6 +135,18 @@ def run_bot():
                     continue
 
                 position = load_position(cur, symbol)
+                controls = get_controls()
+                global_ctrl = controls.get("GLOBAL", {})
+                symbol_ctrl = controls.get(symbol, {})
+
+                global_enabled = global_ctrl.get("enabled", True)
+                symbol_enabled = symbol_ctrl.get("enabled", True)
+
+                global_flatten = global_ctrl.get("flatten_on_disable", False)
+                symbol_flatten = symbol_ctrl.get("flatten_on_disable", False)
+
+                blocked = (not global_enabled) or (not symbol_enabled)
+                flatten_now = ((not global_enabled) and global_flatten) or ((not symbol_enabled) and symbol_flatten)
                 if position:
                     manage_position(cur, position, price)
                     position = load_position(cur, symbol)

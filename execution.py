@@ -1,6 +1,6 @@
 from utils import send_telegram
 from performance import log_trade_performance
-
+from state import get_controls
 
 def _insert_trade(cur, symbol, entry, exit_price, pnl, regime="unknown", reason="", confidence=0, strategy="unknown"):
     """Inserts a completed trade into the history table and logs strategy performance."""
@@ -31,6 +31,11 @@ def _sl_from_pct(entry, pct, is_long):
 
 
 def open_position(
+    controls = get_controls()
+    if not controls.get("GLOBAL", {}).get("enabled", True):
+        return
+    if not controls.get(symbol, {}).get("enabled", True):
+        return
     cur,
     symbol,
     price,

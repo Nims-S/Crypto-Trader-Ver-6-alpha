@@ -31,11 +31,6 @@ def _sl_from_pct(entry, pct, is_long):
 
 
 def open_position(
-    controls = get_controls()
-    if not controls.get("GLOBAL", {}).get("enabled", True):
-        return
-    if not controls.get(symbol, {}).get("enabled", True):
-        return
     cur,
     symbol,
     price,
@@ -53,6 +48,14 @@ def open_position(
     confidence=0,
 ):
     """Calculates regime-specific SL/TP levels and saves a new position to the DB."""
+    # --- KILL SWITCH GUARD ---
+    controls = get_controls()
+
+    if not controls.get("GLOBAL", {}).get("enabled", True):
+        return
+
+    if not controls.get(symbol, {}).get("enabled", True):
+        return
     direction = (direction or "LONG").upper()
     regime = regime or "unknown"
     strategy = strategy or "unknown"

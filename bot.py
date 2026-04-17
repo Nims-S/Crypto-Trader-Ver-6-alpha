@@ -1,4 +1,4 @@
-hiimport time
+import time
 from datetime import datetime
 
 import ccxt

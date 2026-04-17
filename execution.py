@@ -160,7 +160,10 @@ def manage_position(cur, position, price):
                     strategy,
                 )
                 send_telegram(f"⚡ {symbol} TP1 @ {price:.4f} | SL moved to Entry (BE)")
-                return
+                # keep local state updated so TP2 / trailing can still run
+                tp1_hit = True
+                size = remaining
+                sl = entry
 
         if tp1_hit and not tp2_hit and tp2 > 0:
             hit_tp2 = (price >= tp2) if is_long else (price <= tp2)

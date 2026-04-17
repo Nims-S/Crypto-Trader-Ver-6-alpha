@@ -10,7 +10,7 @@ from db import get_conn
 from execution import manage_position, open_position
 from price_feed import feeds
 from risk import calculate_position, get_dynamic_capital, get_strategy_multiplier, risk_gate
-from state import get_state, update_asset
+from state import get_state, update_asset, get_controls
 from strategy import compute_indicators, generate_signal
 
 exchange = ccxt.binance({
@@ -147,10 +147,26 @@ def run_bot():
 
                 blocked = (not global_enabled) or (not symbol_enabled)
                 flatten_now = ((not global_enabled) and global_flatten) or ((not symbol_enabled) and symbol_flatten)
-                if position:
+                # --- KILL SWITCH LOGIC START ---
+                if position and flatten_now:
+                    # emergency flatten: force manage/exit
                     manage_position(cur, position, price)
                     position = load_position(cur, symbol)
 
+                elif position:
+                    # normal management
+                    manage_position(cur, position, price)
+                    position = load_position(cur, symbol)
+                # --- KILL SWITCH LOGIC END ---
+                if blocked:
+                    update_asset(
+                        symbol=symbol,
+                        regime="paused",
+                        strategy="kill_switch",
+                        signal=None,
+                        position=build_position_state(position),
+                    )
+                    continue
                 df = fetch_historical_data(symbol)
                 if df.empty:
                     update_asset(

@@ -32,6 +32,21 @@ def init_db():
     )
     """)
     cur.execute("""
+        CREATE TABLE IF NOT EXISTS trade_controls (
+            scope TEXT PRIMARY KEY,   -- 'GLOBAL' or a symbol like 'BTC/USDT'
+            enabled BOOLEAN NOT NULL DEFAULT TRUE,
+            flatten_on_disable BOOLEAN NOT NULL DEFAULT FALSE,
+            updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+        )
+    """)
+
+    for scope in ["GLOBAL", "BTC/USDT", "ETH/USDT", "SOL/USDT"]:
+        cur.execute("""
+            INSERT INTO trade_controls (scope, enabled, flatten_on_disable)
+            VALUES (%s, TRUE, FALSE)
+            ON CONFLICT (scope) DO NOTHING
+        """, (scope,))
+    cur.execute("""
     CREATE TABLE IF NOT EXISTS strategy_stats (
         strategy TEXT,
         regime TEXT,

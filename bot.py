@@ -114,7 +114,7 @@ def run_bot():
             if not allowed:
                 print(f"[RISK BLOCK] {reason}", flush=True)
                 conn.commit()
-                time.sleep(12)
+                time.sleep(3)
                 continue
 
             cur.execute("SELECT COUNT(*) FROM positions")
@@ -251,7 +251,7 @@ def run_bot():
                 except Exception:
                     pass
 
-        time.sleep(12)
+        time.sleep(3)
 
 
 if __name__ == "__main__":

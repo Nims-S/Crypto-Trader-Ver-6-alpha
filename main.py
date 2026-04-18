@@ -34,8 +34,7 @@ CORS(
 
 BOT_THREAD_LOCK = threading.Lock()
 BOT_THREAD_STARTED = False
-BOT_THREAD_ENABLED = os.getenv("BOT_THREAD_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
-
+BOT_THREAD_ENABLED = os.getenv("BOT_THREAD_ENABLED", "true").lower() in {"1","true","yes","on"}
 
 class IgnoreCaffeineFilter(logging.Filter):
     def filter(self, record):
@@ -141,8 +140,8 @@ def caffeine_controls():
 
 @app.route("/caffeine/controls", methods=["POST"])
 def caffeine_controls_update():
-    data = request.get_json(force=True) or {}
-    scope = data.get("scope", "GLOBAL")
+    data = request.get_json(silent=True) or {}
+    scope = (data.get("scope") or "GLOBAL").strip().upper()
 
     enabled = data.get("enabled")
     flatten_on_disable = data.get("flatten_on_disable")

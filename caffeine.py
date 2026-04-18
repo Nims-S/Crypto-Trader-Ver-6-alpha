@@ -1,7 +1,10 @@
 import requests
 import os
 
-CAFFEINE_URL = os.getenv("CAFFEINE_URL", "https://miner-bot-epc.caffeine.xyz/state")
+CAFFEINE_URL = os.getenv("CAFFEINE_URL")
+
+if not CAFFEINE_URL:
+    raise RuntimeError("CAFFEINE_URL must be set")
 CAFFEINE_TOKEN = os.getenv("CAFFEINE_TOKEN")
 
 

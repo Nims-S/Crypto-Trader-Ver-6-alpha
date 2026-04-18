@@ -56,39 +56,19 @@ def get_controls():
 
 
 def set_control(scope, enabled=None, flatten_on_disable=None):
+    scope = normalize_scope(scope)
+
     conn = get_conn()
     cur = conn.cursor()
 
-    cur.execute(
-        "SELECT enabled, flatten_on_disable FROM trade_controls WHERE scope=%s",
-        (scope,),
-    )
-    row = cur.fetchone()
-
-    if row is None:
-        cur.execute(
-            """
-            INSERT INTO trade_controls (scope, enabled, flatten_on_disable, updated_at)
-            VALUES (%s, %s, %s, NOW())
-            """,
-            (
-                scope,
-                True if enabled is None else bool(enabled),
-                False if flatten_on_disable is None else bool(flatten_on_disable),
-            ),
-        )
-    else:
-        new_enabled = row[0] if enabled is None else bool(enabled)
-        new_flatten = row[1] if flatten_on_disable is None else bool(flatten_on_disable)
-
-        cur.execute(
-            """
-            UPDATE trade_controls
-            SET enabled=%s, flatten_on_disable=%s, updated_at=NOW()
-            WHERE scope=%s
-            """,
-            (new_enabled, new_flatten, scope),
-        )
+    cur.execute("""
+        INSERT INTO controls (scope, enabled, flatten_on_disable)
+        VALUES (%s, %s, %s)
+        ON CONFLICT (scope)
+        DO UPDATE SET
+            enabled = COALESCE(EXCLUDED.enabled, controls.enabled),
+            flatten_on_disable = COALESCE(EXCLUDED.flatten_on_disable, controls.flatten_on_disable)
+    """, (scope, enabled, flatten_on_disable))
 
     conn.commit()
     conn.close()

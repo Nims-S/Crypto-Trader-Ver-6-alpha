@@ -94,25 +94,27 @@ def calculate_position(
     stop_loss_pct: float = 0.005,
     confidence: float = 0.5,
     regime_multiplier: float = 1.0,
+    size_multiplier: float = 1.0,
 ):
     """
     Size using the stricter of:
       1) allocation cap
       2) fixed risk-per-trade budget
     """
-    ratio         = ALLOCATION.get(symbol, 0.33)
-    notional_cap  = total_cap * ratio
+    ratio        = ALLOCATION.get(symbol, 0.33)
+    notional_cap = total_cap * ratio
 
     confidence_multiplier = max(0.5, min(1.25, confidence))
-    regime_multiplier     = max(0.5, min(1.5,  float(regime_multiplier or 1.0)))
+    regime_multiplier     = max(0.5, min(1.5, float(regime_multiplier or 1.0)))
+    size_multiplier       = max(0.5, min(1.25, float(size_multiplier or 1.0)))
 
-    risk_budget        = total_cap * RISK * confidence_multiplier * regime_multiplier
-    stop_distance      = max(price * float(stop_loss_pct), price * 0.0025)
-    risk_based_size    = risk_budget / stop_distance
-    allocation_size    = notional_cap / price
+    risk_budget      = total_cap * RISK * confidence_multiplier * regime_multiplier * size_multiplier
+    stop_distance    = max(price * float(stop_loss_pct), price * 0.0025)
+    risk_based_size  = risk_budget / stop_distance
+    allocation_size  = notional_cap / price
 
-    size             = max(0.0, min(risk_based_size, allocation_size))
-    deployed_capital = size * price
+    size              = max(0.0, min(risk_based_size, allocation_size))
+    deployed_capital  = size * price
 
     # Per-symbol hard cap
     max_symbol_cap = total_cap * MAX_SYMBOL_EXPOSURE_PCT

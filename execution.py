@@ -1,4 +1,3 @@
-from math import isfinite
 from db import get_conn
 from utils import send_telegram
 from performance import log_trade_performance
@@ -109,11 +108,27 @@ def manage_position(cur, position, price):
     tp1_hit = position["tp1_hit"]
     tp2_hit = position["tp2_hit"]
     tp3_hit = position["tp3_hit"]
+    regime = position.get("regime", "unknown")
+    confidence = float(position.get("confidence", 0) or 0)
+    strategy = position.get("strategy", "unknown")
+
+    def record_close(reason, close_price, closed_size):
+        closed_size = max(0.0, float(closed_size or 0.0))
+        if closed_size <= 0:
+            return
+
+        pnl = (float(close_price) - float(entry)) * closed_size if is_long else (float(entry) - float(close_price)) * closed_size
+        cur.execute("""
+            INSERT INTO trades (symbol, entry, exit, pnl, regime, reason, confidence, strategy)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        """, (symbol, entry, close_price, pnl, regime, reason, confidence, strategy))
+        log_trade_performance(strategy, regime, pnl)
 
     # =========================
     # STOP LOSS
     # =========================
     if (is_long and price <= sl) or (not is_long and price >= sl):
+        record_close("stop_loss", price, size)
         cur.execute("DELETE FROM positions WHERE symbol=%s", (symbol,))
         send_telegram(f"❌ SL HIT {symbol} at {price}")
         return
@@ -124,6 +139,7 @@ def manage_position(cur, position, price):
     if not tp1_hit and ((is_long and price >= tp1) or (not is_long and price <= tp1)):
         close_size = original_size * position["tp1_close_fraction"]
         size -= close_size
+        record_close("tp1", price, close_size)
 
         cur.execute("""
             UPDATE positions SET size=%s, tp1_hit=TRUE WHERE symbol=%s
@@ -137,6 +153,7 @@ def manage_position(cur, position, price):
     if not tp2_hit and ((is_long and price >= tp2) or (not is_long and price <= tp2)):
         close_size = original_size * position["tp2_close_fraction"]
         size -= close_size
+        record_close("tp2", price, close_size)
 
         cur.execute("""
             UPDATE positions SET size=%s, tp2_hit=TRUE WHERE symbol=%s
@@ -148,6 +165,7 @@ def manage_position(cur, position, price):
     # TP3
     # =========================
     if tp3 and not tp3_hit and ((is_long and price >= tp3) or (not is_long and price <= tp3)):
+        record_close("tp3", price, size)
         cur.execute("DELETE FROM positions WHERE symbol=%s", (symbol,))
         send_telegram(f"🏁 TP3 HIT {symbol} at {price}")
         return

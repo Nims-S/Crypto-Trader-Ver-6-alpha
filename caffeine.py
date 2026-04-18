@@ -2,14 +2,11 @@ import requests
 import os
 
 CAFFEINE_URL = os.getenv("CAFFEINE_URL")
-
-if not CAFFEINE_URL:
-    raise RuntimeError("CAFFEINE_URL must be set")
 CAFFEINE_TOKEN = os.getenv("CAFFEINE_TOKEN")
 
 
 def push_to_caffeine(data):
-    if not CAFFEINE_TOKEN:
+    if not CAFFEINE_URL or not CAFFEINE_TOKEN:
         return  # silently skip if not configured
 
     try:

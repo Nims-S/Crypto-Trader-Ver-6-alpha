@@ -1,6 +1,8 @@
 # state.py (NEW FILE)
 from datetime import datetime
+
 import json
+
 from db import get_conn
 
 print("✅ STATE.PY LOADED", flush=True)
@@ -38,7 +40,7 @@ def update_asset(symbol, regime, strategy, signal=None, position=None):
 
     conn.commit()
     conn.close()
-    
+
 
 def get_controls():
     conn = get_conn()
@@ -99,17 +101,20 @@ def get_state():
     rows = cur.fetchall()
 
     assets = {}
+    latest_update = None
     for r in rows:
         assets[r[0]] = {
             "regime": r[1],
             "strategy": r[2],
             "signal": r[3],
             "position": r[4],
-            "timestamp": r[5].isoformat()
+            "timestamp": r[5].isoformat() if r[5] else None
         }
+        if r[5] and (latest_update is None or r[5] > latest_update):
+            latest_update = r[5]
     conn.close()
     return {
         "assets": assets,
         "controls": get_controls(),
-        "last_update": datetime.utcnow().isoformat()
+        "last_update": latest_update.isoformat() if latest_update else None
     }

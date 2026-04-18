@@ -103,7 +103,7 @@ def build_position_state(position):
         "size": position["size"],
         "original_size": position.get("original_size"),
         "strategy": position["strategy"],
-    
+     db.py}
 
 
 def run_bot():

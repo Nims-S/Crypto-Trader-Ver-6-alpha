@@ -13,7 +13,24 @@ from risk import get_dynamic_capital
 
 
 app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
+CORS(
+    app,
+    resources={
+        r"/caffeine/*": {
+            "origins": [
+                "https://miner-bot-epc.caffeine.xyz",
+                "https://caffeine.ai",
+            ]
+        },
+        r"/*": {
+            "origins": [
+                "https://miner-bot-epc.caffeine.xyz",
+                "https://caffeine.ai",
+            ]
+        },
+    },
+    supports_credentials=False,
+)
 
 BOT_THREAD_LOCK = threading.Lock()
 BOT_THREAD_STARTED = False

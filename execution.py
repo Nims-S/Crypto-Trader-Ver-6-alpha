@@ -128,6 +128,7 @@ def open_position(
 def manage_position(cur, position, price):
     """Manages exits using the stored strategy-specific settings on the position."""
     symbol = position["symbol"]
+
     try:
         entry = float(position["entry"])
         sl = float(position["sl"])
@@ -137,25 +138,41 @@ def manage_position(cur, position, price):
         regime = position.get("regime") or "unknown"
         strategy = position.get("strategy") or "unknown"
         confidence = float(position.get("confidence") or 0)
-        direction = position.get("direction") or "LONG"
+        direction = (position.get("direction") or "LONG").upper()
         tp1_hit = bool(position.get("tp1_hit"))
         tp2_hit = bool(position.get("tp2_hit"))
         trail_pct = float(position.get("trail_pct") or 0)
-        tp1_close_fraction = float(position.get("tp1_close_fraction") or 0.33)
-        tp2_close_fraction = float(position.get("tp2_close_fraction") or 0.5)
+        tp1_close_fraction = max(0.0, min(1.0, float(position.get("tp1_close_fraction") or 0.33)))
+        tp2_close_fraction = max(0.0, min(1.0, float(position.get("tp2_close_fraction") or 0.5)))
 
-        is_long = direction.upper() == "LONG"
+        is_long = direction == "LONG"
         unit_profit = (price - entry) if is_long else (entry - price)
 
+        print(
+            f"[DEBUG] {symbol} | price={price:.6f} | entry={entry:.6f} | sl={sl:.6f} | "
+            f"tp1={tp1:.6f} | tp2={tp2:.6f} | size={size:.6f} | "
+            f"tp1_hit={tp1_hit} | tp2_hit={tp2_hit}",
+            flush=True,
+        )
+
+        # -------------------------------------------------
+        # TP1
+        # -------------------------------------------------
         if not tp1_hit:
             hit_tp1 = (price >= tp1) if is_long else (price <= tp1)
             if hit_tp1:
                 close_size = min(size, round(size * tp1_close_fraction, 6))
                 remaining = round(size - close_size, 6)
+
                 cur.execute(
-                    "UPDATE positions SET sl=%s, size=%s, tp1_hit=TRUE, updated_at=CURRENT_TIMESTAMP WHERE symbol=%s",
+                    """
+                    UPDATE positions
+                    SET sl=%s, size=%s, tp1_hit=TRUE, updated_at=CURRENT_TIMESTAMP
+                    WHERE symbol=%s
+                    """,
                     (entry, remaining, symbol),
                 )
+
                 _insert_trade(
                     cur,
                     symbol,
@@ -167,22 +184,40 @@ def manage_position(cur, position, price):
                     confidence,
                     strategy,
                 )
+
                 send_telegram(f"⚡ {symbol} TP1 @ {price:.4f} | SL moved to Entry (BE)")
-                # keep local state updated so TP2 / trailing can still run
+
+                # Important: keep going in the same tick.
                 tp1_hit = True
                 size = remaining
                 sl = entry
 
-        if tp1_hit and not tp2_hit and tp2 > 0:
+                if size <= 1e-8:
+                    cur.execute("DELETE FROM positions WHERE symbol=%s", (symbol,))
+                    return
+
+        # -------------------------------------------------
+        # TP2
+        # -------------------------------------------------
+        if tp1_hit and not tp2_hit and tp2 > 0 and size > 1e-8:
             hit_tp2 = (price >= tp2) if is_long else (price <= tp2)
-            if hit_tp2:
+
+            # safety: if price has clearly moved beyond TP2, still exit
+            hard_tp2 = (price >= tp2 * 1.001) if is_long else (price <= tp2 * 0.999)
+
+            if hit_tp2 or hard_tp2:
                 close_size = min(size, round(size * tp2_close_fraction, 6))
                 remaining = round(size - close_size, 6)
+
                 if remaining <= 1e-8:
                     cur.execute("DELETE FROM positions WHERE symbol=%s", (symbol,))
                 else:
                     cur.execute(
-                        "UPDATE positions SET size=%s, tp2_hit=TRUE, updated_at=CURRENT_TIMESTAMP WHERE symbol=%s",
+                        """
+                        UPDATE positions
+                        SET size=%s, tp2_hit=TRUE, updated_at=CURRENT_TIMESTAMP
+                        WHERE symbol=%s
+                        """,
                         (remaining, symbol),
                     )
 
@@ -197,22 +232,40 @@ def manage_position(cur, position, price):
                     confidence,
                     strategy,
                 )
-                send_telegram(f"🎯 {symbol} TP2 @ {price:.4f} | Partial Exit")
-                return
 
-        if unit_profit > 0 and trail_pct > 0:
+                send_telegram(f"🎯 {symbol} TP2 @ {price:.4f} | Partial Exit")
+
+                tp2_hit = True
+                size = remaining
+
+                if size <= 1e-8:
+                    return
+
+        # -------------------------------------------------
+        # Trailing stop after TP1
+        # -------------------------------------------------
+        if tp1_hit and trail_pct > 0 and size > 1e-8:
             trail_sl = (price * (1 - trail_pct)) if is_long else (price * (1 + trail_pct))
-            if (is_long and trail_sl > sl) or (not is_long and trail_sl < sl):
+
+            if (is_long and trail_sl > sl) or ((not is_long) and trail_sl < sl):
                 cur.execute(
-                    "UPDATE positions SET sl=%s, updated_at=CURRENT_TIMESTAMP WHERE symbol=%s",
+                    """
+                    UPDATE positions
+                    SET sl=%s, updated_at=CURRENT_TIMESTAMP
+                    WHERE symbol=%s
+                    """,
                     (round(trail_sl, 4), symbol),
                 )
                 sl = trail_sl
 
+        # -------------------------------------------------
+        # Stop loss / exit
+        # -------------------------------------------------
         hit_sl = (price <= sl) if is_long else (price >= sl)
-        if hit_sl:
+        if hit_sl and size > 1e-8:
             pnl = unit_profit * size
             cur.execute("DELETE FROM positions WHERE symbol=%s", (symbol,))
+
             _insert_trade(
                 cur,
                 symbol,
@@ -224,6 +277,7 @@ def manage_position(cur, position, price):
                 confidence,
                 strategy,
             )
+
             emoji = "✅" if pnl > 0 else "❌"
             send_telegram(f"{emoji} {symbol} EXIT @ {price:.4f} | PnL: ${pnl:.2f}")
 

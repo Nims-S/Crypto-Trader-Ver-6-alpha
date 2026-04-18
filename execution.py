@@ -135,7 +135,7 @@ def open_position(
 def manage_position(cur, position, price):
     """Manages exits using the stored strategy-specific settings on the position."""
     symbol = position["symbol"]
-
+    
     try:
         entry = float(position["entry"])
         sl = float(position["sl"])
@@ -154,6 +154,18 @@ def manage_position(cur, position, price):
 
         is_long = direction == "LONG"
         unit_profit = (price - entry) if is_long else (entry - price)
+
+        # ✅ AUTO FIX LEGACY TP2 (correct place)
+        if tp2 <= 0:
+            fallback_pct = float(position.get("take_profit_pct") or 0) * 1.5
+            tp2 = _price_from_pct(entry, fallback_pct, is_long)
+
+            cur.execute(
+                "UPDATE positions SET tp2=%s WHERE symbol=%s",
+                (round(tp2, 4), symbol),
+            )
+
+            print(f"[AUTO FIX] {symbol} TP2 repaired → {tp2}", flush=True)
 
         print(
             f"[DEBUG] {symbol} | price={price:.6f} | entry={entry:.6f} | sl={sl:.6f} | "
@@ -239,7 +251,7 @@ def manage_position(cur, position, price):
                     confidence,
                     strategy,
                 )
-
+                print(f"[TP2 EXEC] {symbol} closing {close_size} / {size}", flush=True)
                 send_telegram(f"🎯 {symbol} TP2 @ {price:.4f} | Partial Exit")
 
                 tp2_hit = True

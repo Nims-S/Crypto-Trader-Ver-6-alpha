@@ -110,13 +110,20 @@ def generate_signal(symbol: str, df: pd.DataFrame):
     row = df.iloc[-1]
     regime = detect_regime(row)
 
-    # Risk-first: long only, because the current live stack is spot-oriented.
+    # -----------------------------
+    # HIGH VOL FILTER
+    # -----------------------------
     if regime == Regime.HIGH_VOL:
         return no_trade_signal(symbol, regime, "High volatility filter")
 
-    # Trend-following: buy only when momentum agrees.
+    # -----------------------------
+    # TREND STRATEGY
+    # -----------------------------
     if regime == Regime.TREND:
         if row["ema20"] > row["ema50"] > row["ema200"] and 48 <= row["rsi"] <= 72 and row["vol_ratio"] >= 1.0:
+
+            tp1_frac = 0.35
+
             return TradeSignal(
                 symbol=symbol,
                 side="LONG",
@@ -129,14 +136,20 @@ def generate_signal(symbol: str, df: pd.DataFrame):
                 secondary_take_profit_pct=max(0.018, float(row["atr_pct"]) * 3.4),
                 trail_pct=max(0.007, float(row["atr_pct"]) * 1.4),
                 size_multiplier=1.15,
-                tp1_close_fraction=0.35,
-                tp2_close_fraction=0.50,
+                tp1_close_fraction=tp1_frac,
+                tp2_close_fraction=1.0 - tp1_frac,
             )
+
         return no_trade_signal(symbol, regime, "Trend conditions not met")
 
-    # Breakout: buy momentum expansion after compression.
+    # -----------------------------
+    # BREAKOUT STRATEGY
+    # -----------------------------
     if regime == Regime.BREAKOUT:
         if row["close"] >= row["high_20"] * 0.998 and row["rsi"] >= 55 and row["vol_ratio"] >= 1.15:
+
+            tp1_frac = 0.45
+
             return TradeSignal(
                 symbol=symbol,
                 side="LONG",
@@ -149,14 +162,20 @@ def generate_signal(symbol: str, df: pd.DataFrame):
                 secondary_take_profit_pct=max(0.022, float(row["atr_pct"]) * 3.0),
                 trail_pct=max(0.006, float(row["atr_pct"]) * 1.1),
                 size_multiplier=1.05,
-                tp1_close_fraction=0.45,
-                tp2_close_fraction=0.60,
+                tp1_close_fraction=tp1_frac,
+                tp2_close_fraction=1.0 - tp1_frac,
             )
+
         return no_trade_signal(symbol, regime, "Breakout conditions not met")
 
-    # Range mean reversion: buy fear near lower band if trend is not broken.
+    # -----------------------------
+    # RANGE STRATEGY
+    # -----------------------------
     if regime == Regime.RANGE:
         if row["close"] <= row["bb_lower"] * 1.002 and row["rsi"] <= 34 and row["ema20"] >= row["ema50"] * 0.985:
+
+            tp1_frac = 0.50
+
             return TradeSignal(
                 symbol=symbol,
                 side="LONG",
@@ -169,14 +188,20 @@ def generate_signal(symbol: str, df: pd.DataFrame):
                 secondary_take_profit_pct=max(0.012, float(row["atr_pct"]) * 2.1),
                 trail_pct=max(0.004, float(row["atr_pct"]) * 0.8),
                 size_multiplier=0.85,
-                tp1_close_fraction=0.50,
-                tp2_close_fraction=0.75,
+                tp1_close_fraction=tp1_frac,
+                tp2_close_fraction=1.0 - tp1_frac,
             )
+
         return no_trade_signal(symbol, regime, "Range conditions not met")
 
-    # Chop: very selective, only if oversold with decent structure.
+    # -----------------------------
+    # CHOP STRATEGY
+    # -----------------------------
     if regime == Regime.CHOP:
         if row["rsi"] <= 30 and row["close"] > row["ema200"] and row["vol_ratio"] > 0.9:
+
+            tp1_frac = 0.55
+
             return TradeSignal(
                 symbol=symbol,
                 side="LONG",
@@ -189,9 +214,10 @@ def generate_signal(symbol: str, df: pd.DataFrame):
                 secondary_take_profit_pct=max(0.010, float(row["atr_pct"]) * 1.9),
                 trail_pct=max(0.0035, float(row["atr_pct"]) * 0.7),
                 size_multiplier=0.70,
-                tp1_close_fraction=0.55,
-                tp2_close_fraction=0.80,
+                tp1_close_fraction=tp1_frac,
+                tp2_close_fraction=1.0 - tp1_frac,
             )
+
         return no_trade_signal(symbol, regime, "Chop conditions not met")
 
     return no_trade_signal(symbol, regime, "No matching regime logic")

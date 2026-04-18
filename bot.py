@@ -7,7 +7,7 @@ import pandas as pd
 from caffeine import push_to_caffeine
 from config import CAPITAL, CANDLE_LIMIT, DEFAULT_TIMEFRAME, MAX_COOLDOWN_SECONDS, MAX_POSITIONS, SYMBOLS
 from db import get_conn
-from execution import manage_position, open_position
+from execution import manage_position, open_position, update_position_levels
 from price_feed import feeds
 from risk import calculate_position, get_dynamic_capital, get_strategy_multiplier, risk_gate
 from state import get_state, update_asset, get_controls
@@ -25,7 +25,6 @@ except Exception as e:
 
 
 def fetch_historical_data(symbol: str) -> pd.DataFrame:
-    """Fetch historical candles and return an indicator-enriched DataFrame."""
     try:
         bars = exchange.fetch_ohlcv(symbol, timeframe=DEFAULT_TIMEFRAME, limit=CANDLE_LIMIT)
         if not bars:
@@ -65,25 +64,19 @@ def load_position(cur, symbol):
         "tp": row[3],
         "tp2": row[4],
         "tp3": row[5],
-
         "size": float(row[6]),
         "original_size": float(row[7] or row[6]),
-
         "regime": row[8],
         "confidence": row[9],
         "direction": row[10],
-
         "tp1_hit": row[11],
         "tp2_hit": row[12],
         "tp3_hit": row[13],
-
         "strategy": row[14],
-
         "stop_loss_pct": row[15],
         "take_profit_pct": row[16],
         "secondary_take_profit_pct": row[17],
         "trail_pct": row[18],
-
         "tp1_close_fraction": row[19],
         "tp2_close_fraction": row[20],
         "tp3_close_fraction": row[21],
@@ -103,7 +96,7 @@ def build_position_state(position):
         "size": position["size"],
         "original_size": position.get("original_size"),
         "strategy": position["strategy"],
-           }
+    }
 
 
 def run_bot():
@@ -159,44 +152,38 @@ def run_bot():
 
                 blocked = (not global_enabled) or (not symbol_enabled)
                 flatten_now = ((not global_enabled) and global_flatten) or ((not symbol_enabled) and symbol_flatten)
-                # --- KILL SWITCH LOGIC START ---
+
                 if position and flatten_now:
-                    # emergency flatten: force manage/exit
+                    manage_position(cur, position, price)
+                    position = load_position(cur, symbol)
+                elif position:
                     manage_position(cur, position, price)
                     position = load_position(cur, symbol)
 
-                elif position:
-                    # normal management
-                    manage_position(cur, position, price)
-                    position = load_position(cur, symbol)
-                # --- KILL SWITCH LOGIC END ---
                 if blocked:
-                    update_asset(
-                        symbol=symbol,
-                        regime="paused",
-                        strategy="kill_switch",
-                        signal=None,
-                        position=build_position_state(position),
-                    )
+                    update_asset(symbol=symbol, regime="paused", strategy="kill_switch", signal=None, position=build_position_state(position))
                     continue
+
                 df = fetch_historical_data(symbol)
                 if df.empty:
-                    update_asset(
-                        symbol=symbol,
-                        regime="unknown",
-                        strategy="data_unavailable",
-                        signal=None,
-                        position=build_position_state(position),
-                    )
+                    update_asset(symbol=symbol, regime="unknown", strategy="data_unavailable", signal=None, position=build_position_state(position))
                     continue
 
                 signal = generate_signal(symbol, df)
-                if signal and signal.strategy != "no_trade":
-                    print(
-                        f"[SIGNAL] {symbol} | {signal.strategy} | conf={signal.confidence:.2f} | "
-                        f"tp1={signal.take_profit_pct:.4f} | tp2={signal.secondary_take_profit_pct:.4f}",
-                        flush=True
+
+                # 🔥 NEW: RESYNC EXISTING POSITION
+                if signal and signal.side == "LONG" and position:
+                    update_position_levels(
+                        symbol,
+                        signal.stop_loss_pct,
+                        signal.take_profit_pct,
+                        signal.secondary_take_profit_pct,
+                        signal.tp3_pct,
                     )
+
+                if signal and signal.strategy != "no_trade":
+                    print(f"[SIGNAL] {symbol} | {signal.strategy} | conf={signal.confidence:.2f} | tp1={signal.take_profit_pct:.4f} | tp2={signal.secondary_take_profit_pct:.4f}", flush=True)
+
                 strategy_name = signal.strategy if signal else "none"
                 regime = signal.regime if signal else "unknown"
 
@@ -204,10 +191,7 @@ def run_bot():
                     symbol=symbol,
                     regime=regime,
                     strategy=strategy_name,
-                    signal={
-                        "side": signal.side if signal else None,
-                        "confidence": getattr(signal, "confidence", None),
-                    } if signal else None,
+                    signal={"side": signal.side if signal else None, "confidence": getattr(signal, "confidence", None)} if signal else None,
                     position=build_position_state(position),
                 )
 
@@ -249,32 +233,9 @@ def run_bot():
                             trail_pct=signal.trail_pct,
                             tp1_close_fraction=signal.tp1_close_fraction,
                             tp2_close_fraction=signal.tp2_close_fraction,
-                            
                             confidence=signal.confidence,
                         )
                         print(f"[ENTRY] {symbol} | TP1={signal.take_profit_pct} | TP2={signal.secondary_take_profit_pct}", flush=True)
-                        tp2_display = (
-                            price * (1 + signal.secondary_take_profit_pct)
-                            if signal.secondary_take_profit_pct > 0
-                            else price * (1 + signal.take_profit_pct * 1.5)
-                        )
-                        update_asset(
-                            symbol=symbol,
-                            regime=signal.regime,
-                            strategy=signal.strategy,
-                            signal={
-                                 "side": signal.side,
-                                 "confidence": signal.confidence,
-                            },
-                            position={
-                                 "entry_price": price,
-                                 "stop_loss": round(price * (1 - signal.stop_loss_pct), 4),
-                                 "take_profit": round(price * (1 + signal.take_profit_pct), 4),
-                                 "take_profit_2": round(tp2_display, 4),
-                                 "size": size,
-                                 "strategy": signal.strategy,
-                            },
-                        )
                         last_trade_time[symbol] = now
                         active_trades += 1
 

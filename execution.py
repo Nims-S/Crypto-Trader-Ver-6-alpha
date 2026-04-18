@@ -1,6 +1,9 @@
+from math import isfinite
+
 from utils import send_telegram
 from performance import log_trade_performance
 from state import get_controls
+
 
 def _insert_trade(cur, symbol, entry, exit_price, pnl, regime="unknown", reason="", confidence=0, strategy="unknown"):
     """Inserts a completed trade into the history table and logs strategy performance."""
@@ -28,6 +31,49 @@ def _sl_from_pct(entry, pct, is_long):
     if is_long:
         return entry * (1 - pct)
     return entry * (1 + pct)
+
+
+def _safe_float(value, default=0.0):
+    try:
+        value = float(value)
+        return value if isfinite(value) else default
+    except Exception:
+        return default
+
+
+def _normalize_levels(entry, sl, tp1, tp2, tp3, is_long):
+    """Force a valid monotonic ladder around entry.
+
+    Long: entry < sl? no, sl must be below entry and tp1 < tp2 < tp3 above entry.
+    Short: sl must be above entry and tp1 > tp2 > tp3 below entry.
+    """
+    entry = _safe_float(entry)
+    sl = _safe_float(sl)
+    tp1 = _safe_float(tp1)
+    tp2 = _safe_float(tp2)
+    tp3 = _safe_float(tp3)
+
+    if entry <= 0:
+        return entry, sl, tp1, tp2, tp3
+
+    min_risk = entry * 0.0025
+
+    if is_long:
+        if not (sl < entry):
+            sl = entry - min_risk
+        tp1 = max(tp1, entry + min_risk)
+        tp2 = max(tp2, tp1 + min_risk)
+        if tp3 > 0:
+            tp3 = max(tp3, tp2 + min_risk)
+    else:
+        if not (sl > entry):
+            sl = entry + min_risk
+        tp1 = min(tp1 if tp1 > 0 else entry - min_risk, entry - min_risk)
+        tp2 = min(tp2 if tp2 > 0 else tp1 - min_risk, tp1 - min_risk)
+        if tp3 > 0:
+            tp3 = min(tp3, tp2 - min_risk)
+
+    return round(entry, 4), round(sl, 4), round(tp1, 4), round(tp2, 4), round(tp3, 4)
 
 
 def open_position(
@@ -65,9 +111,15 @@ def open_position(
     strategy = strategy or "unknown"
     is_long = direction == "LONG"
     original_size = float(size)
-    sl = _sl_from_pct(price, float(stop_loss_pct or 0), is_long)
-    tp1 = _price_from_pct(price, float(take_profit_pct or 0), is_long)
-    
+
+    stop_loss_pct = max(0.0, _safe_float(stop_loss_pct))
+    take_profit_pct = max(0.0, _safe_float(take_profit_pct))
+    secondary_take_profit_pct = max(0.0, _safe_float(secondary_take_profit_pct))
+    tp3_pct = max(0.0, _safe_float(tp3_pct))
+    trail_pct = max(0.0, _safe_float(trail_pct))
+
+    sl = _sl_from_pct(price, stop_loss_pct, is_long)
+    tp1 = _price_from_pct(price, take_profit_pct, is_long)
 
     # --- CLAMP LOGIC (ANTI-EXPLOSION GUARD) ---
     tp1_pct = float(take_profit_pct or 0)
@@ -82,6 +134,8 @@ def open_position(
     tp1 = _price_from_pct(price, tp1_pct, is_long)
     tp2 = _price_from_pct(price, tp2_pct, is_long)
     tp3 = _price_from_pct(price, tp3_pct, is_long) if tp3_pct > 0 else 0.0
+
+    price, sl, tp1, tp2, tp3 = _normalize_levels(price, sl, tp1, tp2, tp3, is_long)
 
     cur.execute(
         """
@@ -181,11 +235,17 @@ def manage_position(cur, position, price):
         tp3_close_fraction = max(0.0, min(1.0, float(position.get("tp3_close_fraction") or 0.0)))
 
         is_long = direction == "LONG"
+        entry, sl, tp1, tp2, tp3 = _normalize_levels(entry, sl, tp1, tp2, tp3, is_long)
         unit_profit = (price - entry) if is_long else (entry - price)
 
         if tp2 <= 0:
             fallback_pct = float(position.get("take_profit_pct") or 0) * 1.5
             tp2 = _price_from_pct(entry, fallback_pct, is_long)
+            tp2 = _safe_float(tp2)
+            if is_long and tp2 <= tp1:
+                tp2 = tp1 + max(entry * 0.0025, 1e-8)
+            elif (not is_long) and tp2 >= tp1:
+                tp2 = tp1 - max(entry * 0.0025, 1e-8)
 
             cur.execute(
                 "UPDATE positions SET tp2=%s WHERE symbol=%s",

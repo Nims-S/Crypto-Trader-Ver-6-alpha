@@ -329,3 +329,11 @@ if __name__ == "__main__":
     app.run(host="0.0.0.0", port=port)
 else:
     start_background_executor_once()
+────────────────────────────────────────
+
+if __name__ == "__main__":
+    start_background_executor_once()
+    port = int(os.environ.get("PORT", PORT))
+    app.run(host="0.0.0.0", port=port)
+else:
+    start_background_executor_once()

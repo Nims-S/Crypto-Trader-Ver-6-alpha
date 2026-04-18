@@ -266,7 +266,9 @@ def run_bot():
             try:
                 state = get_state()
                 if state.get("assets"):
-                    push_to_caffeine(state)
+                    pushed = push_to_caffeine(state)
+                    if not pushed:
+                        print("[CAFFEINE PUSH] Not delivered", flush=True)
             except Exception as e:
                 print(f"[CAFFEINE ERROR] {e}", flush=True)
 

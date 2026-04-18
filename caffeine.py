@@ -10,11 +10,18 @@ def push_to_caffeine(data):
         return  # silently skip if not configured
 
     try:
-        requests.post(
-            CAFFEINE_URL,
+        response = requests.post(
+            caffeine_url,
             json=data,
-            headers={"Authorization": f"Bearer {CAFFEINE_TOKEN}"},
+            headers=headers,
             timeout=3
         )
+        if response.status_code >= 400:
+            print(
+                f"[CAFFEINE PUSH ERROR] HTTP {response.status_code} from {caffeine_url}: {response.text[:200]}",
+                flush=True
+            )
+            return False
+        return True
     except Exception as e:
         print(f"[CAFFEINE PUSH ERROR] {e}", flush=True)

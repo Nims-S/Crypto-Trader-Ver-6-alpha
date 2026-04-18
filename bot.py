@@ -12,7 +12,7 @@ from price_feed import feeds
 from risk import calculate_position, get_dynamic_capital, get_strategy_multiplier, risk_gate
 from state import get_state, update_asset, get_controls
 from strategy import compute_indicators, generate_signal
-
+from dataclasses import asdict
 exchange = ccxt.binance({
     "enableRateLimit": True,
     "timeout": 15000,
@@ -191,6 +191,12 @@ def run_bot():
                     continue
 
                 signal = generate_signal(symbol, df)
+                if signal and signal.strategy != "no_trade":
+                    print(
+                        f"[SIGNAL] {symbol} | {signal.strategy} | conf={signal.confidence:.2f} | "
+                        f"tp1={signal.take_profit_pct:.4f} | tp2={signal.secondary_take_profit_pct:.4f}",
+                        flush=True
+                    )
                 strategy_name = signal.strategy if signal else "none"
                 regime = signal.regime if signal else "unknown"
 
@@ -238,11 +244,12 @@ def run_bot():
                             stop_loss_pct=signal.stop_loss_pct,
                             take_profit_pct=signal.take_profit_pct,
                             secondary_take_profit_pct=signal.secondary_take_profit_pct,
-                            tp3_pct=0.15 if signal.regime in ["trend", "breakout"] else 0.0,  # ⭐ MOON LOGIC
+                            tp3_pct=signal.tp3_pct,
+                            tp3_close_fraction=signal.tp3_close_fraction,
                             trail_pct=signal.trail_pct,
                             tp1_close_fraction=signal.tp1_close_fraction,
                             tp2_close_fraction=signal.tp2_close_fraction,
-                            tp3_close_fraction=0.15,  # ⭐ 15% runner
+                            
                             confidence=signal.confidence,
                         )
                         print(f"[ENTRY] {symbol} | TP1={signal.take_profit_pct} | TP2={signal.secondary_take_profit_pct}", flush=True)

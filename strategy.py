@@ -3,7 +3,7 @@ from enum import Enum
 import pandas as pd
 from dataclasses import asdict
 
-print(asdict(signal))
+
 class Regime(str, Enum):
     TREND = "trend"
     RANGE = "range"

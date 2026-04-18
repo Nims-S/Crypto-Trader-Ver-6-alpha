@@ -63,7 +63,14 @@ def open_position(
 
     sl = _sl_from_pct(price, float(stop_loss_pct or 0), is_long)
     tp1 = _price_from_pct(price, float(take_profit_pct or 0), is_long)
-    tp2 = _price_from_pct(price, float(secondary_take_profit_pct or 0), is_long)
+    secondary_tp = float(secondary_take_profit_pct or 0)
+
+    if secondary_tp > 0:
+        tp2 = _price_from_pct(price, secondary_tp, is_long)
+    else:
+        # fallback if strategy gives 0
+        fallback_pct = float(take_profit_pct or 0) * 1.5
+        tp2 = _price_from_pct(price, fallback_pct, is_long)
 
     cur.execute(
         """

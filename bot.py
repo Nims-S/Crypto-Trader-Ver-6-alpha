@@ -193,7 +193,7 @@ def run_bot():
                     position=build_position_state(position),
                 )
 
-                if signal and signal.side == "LONG" and not position:
+                if signal and signal.side == "LONG" and signal.strategy != "no_trade" and not position:
                     if active_trades >= MAX_POSITIONS:
                         print(f"[SKIP] Max positions reached. Skipping {symbol}.", flush=True)
                         continue

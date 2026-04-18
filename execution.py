@@ -207,7 +207,7 @@ def update_position_levels(
     sl_pct: float,
     tp1_pct: float,
     tp2_pct: float,
-    tp3_pct: float,
+    tp3_pct: float | None,
 ) -> None:
     """
     Force-update SL/TP levels for an existing position.
@@ -216,19 +216,23 @@ def update_position_levels(
     changes are rolled back automatically if the outer transaction fails.
     """
     cur.execute(
-        "SELECT entry, direction FROM positions WHERE symbol=%s", (symbol,)
+        "SELECT entry, direction, tp3 FROM positions WHERE symbol=%s", (symbol,)
     )
     row = cur.fetchone()
     if not row:
         return
 
-    entry, direction = row
+    entry, direction, current_tp3 = row
     is_long = (direction or "LONG").upper() == "LONG"
 
     sl  = _sl_from_pct(entry, sl_pct, is_long)
     tp1 = _price_from_pct(entry, tp1_pct, is_long)
     tp2 = _price_from_pct(entry, tp2_pct, is_long)
-    tp3 = _price_from_pct(entry, tp3_pct, is_long) if tp3_pct > 0 else 0.0
+
+    if tp3_pct is None:
+        tp3 = float(current_tp3 or 0.0)
+    else:
+        tp3 = _price_from_pct(entry, tp3_pct, is_long) if tp3_pct > 0 else 0.0
 
     entry, sl, tp1, tp2, tp3 = _normalize_levels(entry, sl, tp1, tp2, tp3, is_long)
 

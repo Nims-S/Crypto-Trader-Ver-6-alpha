@@ -9,6 +9,11 @@ STATE = {
     "assets": {}
 }
 
+
+def normalize_scope(scope):
+    return (scope or "GLOBAL").strip().upper()
+
+
 def update_asset(symbol, regime, strategy, signal=None, position=None):
     conn = get_conn()
     cur = conn.cursor()
@@ -34,6 +39,7 @@ def update_asset(symbol, regime, strategy, signal=None, position=None):
     conn.commit()
     conn.close()
     
+
 def get_controls():
     conn = get_conn()
     cur = conn.cursor()
@@ -45,7 +51,7 @@ def get_controls():
     rows = cur.fetchall()
     conn.close()
 
-    return {
+    controls = {
         r[0]: {
             "enabled": r[1],
             "flatten_on_disable": r[2],
@@ -53,6 +59,15 @@ def get_controls():
         }
         for r in rows
     }
+
+    if "GLOBAL" not in controls:
+        controls["GLOBAL"] = {
+            "enabled": True,
+            "flatten_on_disable": False,
+            "updated_at": None,
+        }
+
+    return controls
 
 
 def set_control(scope, enabled=None, flatten_on_disable=None):
@@ -62,16 +77,18 @@ def set_control(scope, enabled=None, flatten_on_disable=None):
     cur = conn.cursor()
 
     cur.execute("""
-        INSERT INTO controls (scope, enabled, flatten_on_disable)
+        INSERT INTO trade_controls (scope, enabled, flatten_on_disable)
         VALUES (%s, %s, %s)
         ON CONFLICT (scope)
         DO UPDATE SET
-            enabled = COALESCE(EXCLUDED.enabled, controls.enabled),
-            flatten_on_disable = COALESCE(EXCLUDED.flatten_on_disable, controls.flatten_on_disable)
+            enabled = COALESCE(EXCLUDED.enabled, trade_controls.enabled),
+            flatten_on_disable = COALESCE(EXCLUDED.flatten_on_disable, trade_controls.flatten_on_disable),
+            updated_at = NOW()
     """, (scope, enabled, flatten_on_disable))
 
     conn.commit()
     conn.close()
+
 
 def get_state():
     conn = get_conn()

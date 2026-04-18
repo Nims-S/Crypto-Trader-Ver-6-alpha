@@ -12,7 +12,7 @@ from price_feed import feeds
 from risk import calculate_position, get_dynamic_capital, get_strategy_multiplier, risk_gate
 from state import get_state, update_asset, get_controls
 from strategy import compute_indicators, generate_signal
-from dataclasses import asdict
+
 exchange = ccxt.binance({
     "enableRateLimit": True,
     "timeout": 15000,
@@ -24,6 +24,9 @@ except Exception as e:
     print(f"[EXCHANGE WARN] load_markets failed: {e}", flush=True)
 
 
+# =========================
+# DATA FETCH
+# =========================
 def fetch_historical_data(symbol: str) -> pd.DataFrame:
     try:
         bars = exchange.fetch_ohlcv(symbol, timeframe=DEFAULT_TIMEFRAME, limit=CANDLE_LIMIT)
@@ -41,6 +44,9 @@ def fetch_historical_data(symbol: str) -> pd.DataFrame:
         return pd.DataFrame()
 
 
+# =========================
+# LOAD POSITION
+# =========================
 def load_position(cur, symbol):
     cur.execute(
         """
@@ -99,8 +105,11 @@ def build_position_state(position):
     }
 
 
+# =========================
+# MAIN LOOP
+# =========================
 def run_bot():
-    print("[BOT] LOOP STARTED (v6 alpha)", flush=True)
+    print("[BOT] LOOP STARTED (v6 hardened)", flush=True)
     last_trade_time = {}
 
     while True:
@@ -116,6 +125,7 @@ def run_bot():
 
             total_cap = get_dynamic_capital(cur, CAPITAL)
             allowed, reason = risk_gate(cur, total_cap)
+
             if not allowed:
                 print(f"[RISK BLOCK] {reason}", flush=True)
                 conn.commit()
@@ -140,6 +150,27 @@ def run_bot():
                     continue
 
                 position = load_position(cur, symbol)
+
+                # =========================
+                # 🔥 HARDENED: ALWAYS RESYNC
+                # =========================
+                if position:
+                    try:
+                        print(f"[DEBUG] Syncing {symbol}", flush=True)
+
+                        update_position_levels(
+                            symbol,
+                            position.get("stop_loss_pct", 0),
+                            position.get("take_profit_pct", 0),
+                            position.get("secondary_take_profit_pct", 0),
+                            0.0
+                        )
+                    except Exception as e:
+                        print(f"[SYNC ERROR] {symbol}: {e}", flush=True)
+
+                # =========================
+                # CONTROLS
+                # =========================
                 controls = get_controls()
                 global_ctrl = controls.get("GLOBAL", {})
                 symbol_ctrl = controls.get(symbol, {})
@@ -147,16 +178,9 @@ def run_bot():
                 global_enabled = global_ctrl.get("enabled", True)
                 symbol_enabled = symbol_ctrl.get("enabled", True)
 
-                global_flatten = global_ctrl.get("flatten_on_disable", False)
-                symbol_flatten = symbol_ctrl.get("flatten_on_disable", False)
-
                 blocked = (not global_enabled) or (not symbol_enabled)
-                flatten_now = ((not global_enabled) and global_flatten) or ((not symbol_enabled) and symbol_flatten)
 
-                if position and flatten_now:
-                    manage_position(cur, position, price)
-                    position = load_position(cur, symbol)
-                elif position:
+                if position:
                     manage_position(cur, position, price)
                     position = load_position(cur, symbol)
 
@@ -164,6 +188,9 @@ def run_bot():
                     update_asset(symbol=symbol, regime="paused", strategy="kill_switch", signal=None, position=build_position_state(position))
                     continue
 
+                # =========================
+                # DATA + SIGNAL
+                # =========================
                 df = fetch_historical_data(symbol)
                 if df.empty:
                     update_asset(symbol=symbol, regime="unknown", strategy="data_unavailable", signal=None, position=build_position_state(position))
@@ -171,18 +198,8 @@ def run_bot():
 
                 signal = generate_signal(symbol, df)
 
-                # 🔥 NEW: RESYNC EXISTING POSITION
-                if signal and signal.side == "LONG" and position:
-                    update_position_levels(
-                        symbol,
-                        signal.stop_loss_pct,
-                        signal.take_profit_pct,
-                        signal.secondary_take_profit_pct,
-                        signal.tp3_pct,
-                    )
-
                 if signal and signal.strategy != "no_trade":
-                    print(f"[SIGNAL] {symbol} | {signal.strategy} | conf={signal.confidence:.2f} | tp1={signal.take_profit_pct:.4f} | tp2={signal.secondary_take_profit_pct:.4f}", flush=True)
+                    print(f"[SIGNAL] {symbol} | {signal.strategy} | conf={signal.confidence:.2f}", flush=True)
 
                 strategy_name = signal.strategy if signal else "none"
                 regime = signal.regime if signal else "unknown"
@@ -195,9 +212,12 @@ def run_bot():
                     position=build_position_state(position),
                 )
 
+                # =========================
+                # ENTRY
+                # =========================
                 if signal and signal.side == "LONG" and signal.strategy != "no_trade" and not position:
+
                     if active_trades >= MAX_POSITIONS:
-                        print(f"[SKIP] Max positions reached. Skipping {symbol}.", flush=True)
                         continue
 
                     now = time.time()
@@ -235,36 +255,31 @@ def run_bot():
                             tp2_close_fraction=signal.tp2_close_fraction,
                             confidence=signal.confidence,
                         )
-                        print(f"[ENTRY] {symbol} | TP1={signal.take_profit_pct} | TP2={signal.secondary_take_profit_pct}", flush=True)
+
+                        print(f"[ENTRY] {symbol}", flush=True)
+
                         last_trade_time[symbol] = now
                         active_trades += 1
 
             conn.commit()
+
             try:
                 state = get_state()
                 if state.get("assets"):
                     push_to_caffeine(state)
             except Exception as e:
-                print(f"[CAFFEINE LOOP ERROR] {e}", flush=True)
+                print(f"[CAFFEINE ERROR] {e}", flush=True)
 
         except Exception as e:
             if conn:
-                try:
-                    conn.rollback()
-                except Exception:
-                    pass
+                conn.rollback()
             print(f"[CRITICAL ERROR] {e}", flush=True)
+
         finally:
             if cur:
-                try:
-                    cur.close()
-                except Exception:
-                    pass
+                cur.close()
             if conn:
-                try:
-                    conn.close()
-                except Exception:
-                    pass
+                conn.close()
 
         time.sleep(3)
 

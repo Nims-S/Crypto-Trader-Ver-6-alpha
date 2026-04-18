@@ -24,6 +24,8 @@ class TradeSignal:
     size_multiplier: float
     tp1_close_fraction: float
     tp2_close_fraction: float
+    tp3_pct: float = 0.0
+    tp3_enabled: bool = False
 
 def no_trade_signal(symbol, regime, reason="No valid setup"):
     return TradeSignal(
@@ -40,6 +42,7 @@ def no_trade_signal(symbol, regime, reason="No valid setup"):
         size_multiplier=0.0,
         tp1_close_fraction=0.0,
         tp2_close_fraction=0.0,
+        tp3_close_fraction=0.0,
     )
 
 def compute_indicators(df: pd.DataFrame) -> pd.DataFrame:
@@ -136,8 +139,12 @@ def generate_signal(symbol: str, df: pd.DataFrame):
                 secondary_take_profit_pct=max(0.018, float(row["atr_pct"]) * 3.4),
                 trail_pct=max(0.007, float(row["atr_pct"]) * 1.4),
                 size_multiplier=1.15,
-                tp1_close_fraction=tp1_frac,
-                tp2_close_fraction=1.0 - tp1_frac,
+                tp1_close_fraction=0.35,
+                tp2_close_fraction=0.50,
+                tp3_pct = max(0.05, float(row["atr_pct"]) * 6)
+
+                tp3_enabled = True
+                tp3_frac = 0.15
             )
 
         return no_trade_signal(symbol, regime, "Trend conditions not met")
@@ -162,8 +169,12 @@ def generate_signal(symbol: str, df: pd.DataFrame):
                 secondary_take_profit_pct=max(0.022, float(row["atr_pct"]) * 3.0),
                 trail_pct=max(0.006, float(row["atr_pct"]) * 1.1),
                 size_multiplier=1.05,
-                tp1_close_fraction=tp1_frac,
-                tp2_close_fraction=1.0 - tp1_frac,
+                tp1_close_fraction=0.35,
+                tp2_close_fraction=0.50,
+                tp3_pct = max(0.06, float(row["atr_pct"]) * 7)
+
+                tp3_enabled = True
+                tp3_frac = 0.20
             )
 
         return no_trade_signal(symbol, regime, "Breakout conditions not met")
@@ -188,8 +199,11 @@ def generate_signal(symbol: str, df: pd.DataFrame):
                 secondary_take_profit_pct=max(0.012, float(row["atr_pct"]) * 2.1),
                 trail_pct=max(0.004, float(row["atr_pct"]) * 0.8),
                 size_multiplier=0.85,
-                tp1_close_fraction=tp1_frac,
-                tp2_close_fraction=1.0 - tp1_frac,
+                tp1_close_fraction=0.50,
+                tp2_close_fraction=0.50,
+                tp3_pct = 0.0
+                tp3_enabled = False
+                tp3_frac = 0.0
             )
 
         return no_trade_signal(symbol, regime, "Range conditions not met")
@@ -214,8 +228,12 @@ def generate_signal(symbol: str, df: pd.DataFrame):
                 secondary_take_profit_pct=max(0.010, float(row["atr_pct"]) * 1.9),
                 trail_pct=max(0.0035, float(row["atr_pct"]) * 0.7),
                 size_multiplier=0.70,
-                tp1_close_fraction=tp1_frac,
-                tp2_close_fraction=1.0 - tp1_frac,
+                tp1_close_fraction=0.50,
+                tp2_close_fraction=0.50,
+                tp3_pct = max(0.03, float(row["atr_pct"]) * 4)
+
+                tp3_enabled = True
+                tp3_frac = 0.10
             )
 
         return no_trade_signal(symbol, regime, "Chop conditions not met")

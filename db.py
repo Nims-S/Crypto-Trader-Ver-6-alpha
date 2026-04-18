@@ -68,7 +68,10 @@ def init_db():
     cur.execute("ALTER TABLE positions ADD COLUMN IF NOT EXISTS trail_pct FLOAT DEFAULT 0")
     cur.execute("ALTER TABLE positions ADD COLUMN IF NOT EXISTS tp1_close_fraction FLOAT DEFAULT 0.33")
     cur.execute("ALTER TABLE positions ADD COLUMN IF NOT EXISTS tp2_close_fraction FLOAT DEFAULT 0.5")
-
+    cur.execute("ALTER TABLE positions ADD COLUMN IF NOT EXISTS original_size NUMERIC")
+    cur.execute("ALTER TABLE positions ADD COLUMN IF NOT EXISTS tp3 NUMERIC")
+    cur.execute("ALTER TABLE positions ADD COLUMN IF NOT EXISTS tp3_hit BOOLEAN NOT NULL DEFAULT FALSE")
+    cur.execute("ALTER TABLE positions ADD COLUMN IF NOT EXISTS tp3_close_fraction NUMERIC")
     
     migration_columns = [
         ("positions", "regime", "TEXT DEFAULT 'unknown'"),

@@ -42,9 +42,13 @@ def open_position(
     stop_loss_pct=0.005,
     take_profit_pct=0.01,
     secondary_take_profit_pct=0.02,
+    tp3_pct=0.0,
     trail_pct=0.005,
+    
+
     tp1_close_fraction=0.33,
     tp2_close_fraction=0.5,
+    tp3_close_fraction=0.0,
     confidence=0,
 ):
     """Calculates regime-specific SL/TP levels and saves a new position to the DB."""
@@ -60,32 +64,42 @@ def open_position(
     regime = regime or "unknown"
     strategy = strategy or "unknown"
     is_long = direction == "LONG"
-
+    original_size = float(size)
     sl = _sl_from_pct(price, float(stop_loss_pct or 0), is_long)
     tp1 = _price_from_pct(price, float(take_profit_pct or 0), is_long)
-    secondary_tp = float(secondary_take_profit_pct or 0)
+    
 
-    if secondary_tp > 0:
-        tp2 = _price_from_pct(price, secondary_tp, is_long)
-    else:
-        # fallback if strategy gives 0
-        fallback_pct = float(take_profit_pct or 0) * 1.5
-        tp2 = _price_from_pct(price, fallback_pct, is_long)
+    # --- CLAMP LOGIC (ANTI-EXPLOSION GUARD) ---
+    tp1_pct = float(take_profit_pct or 0)
+    tp2_pct = float(secondary_take_profit_pct or tp1_pct * 1.5)
+    tp3_pct = float(tp3_pct or 0)
+
+    # HARD CAPS (CRITICAL)
+    tp2_pct = min(tp2_pct, 0.08)   # max 8%
+    tp3_pct = min(tp3_pct, 0.15)   # max 15%
+
+    # Build prices
+    tp1 = _price_from_pct(price, tp1_pct, is_long)
+    tp2 = _price_from_pct(price, tp2_pct, is_long)
+    tp3 = _price_from_pct(price, tp3_pct, is_long) if tp3_pct > 0 else 0.0
 
     cur.execute(
         """
         INSERT INTO positions (
-            symbol, entry, sl, tp, tp2, size, direction, regime, confidence,
+            symbol, entry, sl, tp, tp2, tp3, size, original_size, direction, regime, confidence,
             strategy, stop_loss_pct, take_profit_pct, secondary_take_profit_pct,
-            trail_pct, tp1_close_fraction, tp2_close_fraction, tp1_hit, tp2_hit
+            trail_pct, tp1_close_fraction, tp2_close_fraction, tp3_close_fraction,
+            tp1_hit, tp2_hit, tp3_hit
         )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, FALSE, FALSE)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, FALSE, FALSE, FALSE)
         ON CONFLICT (symbol) DO UPDATE SET
             entry = EXCLUDED.entry,
             sl = EXCLUDED.sl,
             tp = EXCLUDED.tp,
             tp2 = EXCLUDED.tp2,
+            tp3 = EXCLUDED.tp3,
             size = EXCLUDED.size,
+            original_size = EXCLUDED.original_size,
             direction = EXCLUDED.direction,
             regime = EXCLUDED.regime,
             confidence = EXCLUDED.confidence,
@@ -96,17 +110,21 @@ def open_position(
             trail_pct = EXCLUDED.trail_pct,
             tp1_close_fraction = EXCLUDED.tp1_close_fraction,
             tp2_close_fraction = EXCLUDED.tp2_close_fraction,
+            tp3_close_fraction = EXCLUDED.tp3_close_fraction,
             tp1_hit = FALSE,
             tp2_hit = FALSE,
+            tp3_hit = FALSE,
             updated_at = CURRENT_TIMESTAMP
         """,
         (
-            symbol,
+             symbol,
             price,
             round(sl, 4),
             round(tp1, 4),
             round(tp2, 4),
+            round(tp3, 4),
             size,
+            original_size,
             direction,
             regime,
             float(confidence or 0),
@@ -117,6 +135,7 @@ def open_position(
             float(trail_pct or 0),
             float(tp1_close_fraction or 0.33),
             float(tp2_close_fraction or 0.5),
+            float(tp3_close_fraction or 0.0),
         ),
     )
 
@@ -141,21 +160,29 @@ def manage_position(cur, position, price):
         sl = float(position["sl"])
         tp1 = float(position["tp"])
         tp2 = float(position["tp2"] or 0)
+        tp3 = float(position.get("tp3") or 0)
+
         size = float(position["size"])
+        original_size = float(position.get("original_size") or size)
+
         regime = position.get("regime") or "unknown"
         strategy = position.get("strategy") or "unknown"
         confidence = float(position.get("confidence") or 0)
         direction = (position.get("direction") or "LONG").upper()
+
         tp1_hit = bool(position.get("tp1_hit"))
         tp2_hit = bool(position.get("tp2_hit"))
+        tp3_hit = bool(position.get("tp3_hit"))
+
         trail_pct = float(position.get("trail_pct") or 0)
+
         tp1_close_fraction = max(0.0, min(1.0, float(position.get("tp1_close_fraction") or 0.33)))
         tp2_close_fraction = max(0.0, min(1.0, float(position.get("tp2_close_fraction") or 0.5)))
+        tp3_close_fraction = max(0.0, min(1.0, float(position.get("tp3_close_fraction") or 0.0)))
 
         is_long = direction == "LONG"
         unit_profit = (price - entry) if is_long else (entry - price)
 
-        # ✅ AUTO FIX LEGACY TP2 (correct place)
         if tp2 <= 0:
             fallback_pct = float(position.get("take_profit_pct") or 0) * 1.5
             tp2 = _price_from_pct(entry, fallback_pct, is_long)
@@ -164,13 +191,12 @@ def manage_position(cur, position, price):
                 "UPDATE positions SET tp2=%s WHERE symbol=%s",
                 (round(tp2, 4), symbol),
             )
-
             print(f"[AUTO FIX] {symbol} TP2 repaired → {tp2}", flush=True)
 
         print(
             f"[DEBUG] {symbol} | price={price:.6f} | entry={entry:.6f} | sl={sl:.6f} | "
-            f"tp1={tp1:.6f} | tp2={tp2:.6f} | size={size:.6f} | "
-            f"tp1_hit={tp1_hit} | tp2_hit={tp2_hit}",
+            f"tp1={tp1:.6f} | tp2={tp2:.6f} | tp3={tp3:.6f} | size={size:.6f} | "
+            f"tp1_hit={tp1_hit} | tp2_hit={tp2_hit} | tp3_hit={tp3_hit}",
             flush=True,
         )
 
@@ -180,7 +206,7 @@ def manage_position(cur, position, price):
         if not tp1_hit:
             hit_tp1 = (price >= tp1) if is_long else (price <= tp1)
             if hit_tp1:
-                close_size = min(size, round(size * tp1_close_fraction, 6))
+                close_size = min(size, round(original_size * tp1_close_fraction, 6))
                 remaining = round(size - close_size, 6)
 
                 cur.execute(
@@ -206,7 +232,6 @@ def manage_position(cur, position, price):
 
                 send_telegram(f"⚡ {symbol} TP1 @ {price:.4f} | SL moved to Entry (BE)")
 
-                # Important: keep going in the same tick.
                 tp1_hit = True
                 size = remaining
                 sl = entry
@@ -225,7 +250,7 @@ def manage_position(cur, position, price):
             hard_tp2 = (price >= tp2 * 1.001) if is_long else (price <= tp2 * 0.999)
 
             if hit_tp2 or hard_tp2:
-                close_size = min(size, round(size * tp2_close_fraction, 6))
+                close_size = min(size, round(original_size * tp2_close_fraction, 6))
                 remaining = round(size - close_size, 6)
 
                 if remaining <= 1e-8:
@@ -251,10 +276,53 @@ def manage_position(cur, position, price):
                     confidence,
                     strategy,
                 )
-                print(f"[TP2 EXEC] {symbol} closing {close_size} / {size}", flush=True)
+                print(f"[TP2 EXEC] {symbol} closing {close_size} / {original_size}", flush=True)
                 send_telegram(f"🎯 {symbol} TP2 @ {price:.4f} | Partial Exit")
 
                 tp2_hit = True
+                size = remaining
+
+                if size <= 1e-8:
+                    return
+                # --- AGGRESSIVE TRAIL AFTER TP2 ---
+                trail_pct *= 0.7
+        # -------------------------------------------------
+        # TP3
+        # -------------------------------------------------
+        if tp3 > 0 and not tp3_hit and size > 1e-8:
+            hit_tp3 = (price >= tp3) if is_long else (price <= tp3)
+
+            if hit_tp3:
+                close_size = min(size, round(original_size * tp3_close_fraction, 6))
+                remaining = round(size - close_size, 6)
+
+                if remaining <= 1e-8:
+                    cur.execute("DELETE FROM positions WHERE symbol=%s", (symbol,))
+                else:
+                    cur.execute(
+                        """
+                        UPDATE positions
+                        SET size=%s, tp3_hit=TRUE, updated_at=CURRENT_TIMESTAMP
+                        WHERE symbol=%s
+                        """,
+                        (remaining, symbol),
+                    )
+
+                _insert_trade(
+                    cur,
+                    symbol,
+                    entry,
+                    price,
+                    unit_profit * close_size,
+                    regime,
+                    f"{strategy}:TP3",
+                    confidence,
+                    strategy,
+                )
+
+                send_telegram(f"🌙 {symbol} TP3 @ {price:.4f} | Moon Exit")
+
+                tp3_hit = True
                 size = remaining
 
                 if size <= 1e-8:

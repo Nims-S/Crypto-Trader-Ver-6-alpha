@@ -46,9 +46,9 @@ def load_position(cur, symbol):
     cur.execute(
         """
         SELECT
-            symbol, entry, sl, tp, tp2, size, regime, confidence, direction,
-            tp1_hit, tp2_hit, strategy, stop_loss_pct, take_profit_pct,
-            secondary_take_profit_pct, trail_pct, tp1_close_fraction, tp2_close_fraction
+            symbol, entry, sl, tp, tp2, tp3, size, original_size, regime, confidence, direction,
+            tp1_hit, tp2_hit, tp3_hit, strategy, stop_loss_pct, take_profit_pct,
+            secondary_take_profit_pct, trail_pct, tp1_close_fraction, tp2_close_fraction, tp3_close_fraction
         FROM positions
         WHERE symbol=%s FOR UPDATE SKIP LOCKED
         """,
@@ -64,19 +64,29 @@ def load_position(cur, symbol):
         "sl": row[2],
         "tp": row[3],
         "tp2": row[4],
-        "size": row[5],
-        "regime": row[6],
-        "confidence": row[7],
-        "direction": row[8],
-        "tp1_hit": row[9],
-        "tp2_hit": row[10],
-        "strategy": row[11],
-        "stop_loss_pct": row[12],
-        "take_profit_pct": row[13],
-        "secondary_take_profit_pct": row[14],
-        "trail_pct": row[15],
-        "tp1_close_fraction": row[16],
-        "tp2_close_fraction": row[17],
+        "tp3": row[5],
+
+        "size": float(row[6]),
+        "original_size": float(row[7] or row[6]),
+
+        "regime": row[8],
+        "confidence": row[9],
+        "direction": row[10],
+
+        "tp1_hit": row[11],
+        "tp2_hit": row[12],
+        "tp3_hit": row[13],
+
+        "strategy": row[14],
+
+        "stop_loss_pct": row[15],
+        "take_profit_pct": row[16],
+        "secondary_take_profit_pct": row[17],
+        "trail_pct": row[18],
+
+        "tp1_close_fraction": row[19],
+        "tp2_close_fraction": row[20],
+        "tp3_close_fraction": row[21],
     }
 
 
@@ -89,9 +99,11 @@ def build_position_state(position):
         "stop_loss": position["sl"],
         "take_profit": position["tp"],
         "take_profit_2": position["tp2"],
+        "take_profit_3": position.get("tp3"),
         "size": position["size"],
+        "original_size": position.get("original_size"),
         "strategy": position["strategy"],
-    }
+    db.py}
 
 
 def run_bot():
@@ -226,9 +238,11 @@ def run_bot():
                             stop_loss_pct=signal.stop_loss_pct,
                             take_profit_pct=signal.take_profit_pct,
                             secondary_take_profit_pct=signal.secondary_take_profit_pct,
+                            tp3_pct=0.15 if signal.regime in ["trend", "breakout"] else 0.0,  # ⭐ MOON LOGIC
                             trail_pct=signal.trail_pct,
                             tp1_close_fraction=signal.tp1_close_fraction,
                             tp2_close_fraction=signal.tp2_close_fraction,
+                            tp3_close_fraction=0.15,  # ⭐ 15% runner
                             confidence=signal.confidence,
                         )
                         print(f"[ENTRY] {symbol} | TP1={signal.take_profit_pct} | TP2={signal.secondary_take_profit_pct}", flush=True)

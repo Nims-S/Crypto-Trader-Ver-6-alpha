@@ -1,7 +1,7 @@
 import requests
 import os
 
-CAFFEINE_URL = os.getenv("CAFFEINE_URL", "https://algobot-core-engine-dh7.caffeine.xyz/state")
+CAFFEINE_URL = os.getenv("CAFFEINE_URL", "https://miner-bot-epc.caffeine.xyz/state")
 CAFFEINE_TOKEN = os.getenv("CAFFEINE_TOKEN")
 
 

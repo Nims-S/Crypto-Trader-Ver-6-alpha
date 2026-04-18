@@ -21,11 +21,12 @@ ALLOWED_ORIGINS = [
     ).split(",")
     if o.strip()
 ]
+CAFFEINE_ORIGIN_REGEX = r"https://([a-zA-Z0-9-]+\.)*caffeine\.xyz$"
 
 CORS(
     app,
     resources={
-        r"/caffeine/*": {"origins": ALLOWED_ORIGINS},
+        r"/caffeine/*": {"origins": [*ALLOWED_ORIGINS, CAFFEINE_ORIGIN_REGEX]},
         r"/*": {"origins": ALLOWED_ORIGINS},
     },
     supports_credentials=False,

@@ -1,7 +1,9 @@
 from dataclasses import dataclass
 from enum import Enum
 import pandas as pd
+from dataclasses import asdict
 
+print(asdict(signal))
 class Regime(str, Enum):
     TREND = "trend"
     RANGE = "range"
@@ -26,6 +28,8 @@ class TradeSignal:
     tp2_close_fraction: float
     tp3_pct: float = 0.0
     tp3_enabled: bool = False
+    tp3_close_fraction: float = 0.0 
+
 
 def no_trade_signal(symbol, regime, reason="No valid setup"):
     return TradeSignal(
@@ -141,10 +145,9 @@ def generate_signal(symbol: str, df: pd.DataFrame):
                 size_multiplier=1.15,
                 tp1_close_fraction=0.35,
                 tp2_close_fraction=0.50,
-                tp3_pct = max(0.05, float(row["atr_pct"]) * 6)
-
-                tp3_enabled = True
-                tp3_frac = 0.15
+                tp3_pct=max(0.05, float(row["atr_pct"]) * 6),
+                tp3_enabled=True,
+                tp3_close_fraction=0.15
             )
 
         return no_trade_signal(symbol, regime, "Trend conditions not met")
@@ -171,10 +174,9 @@ def generate_signal(symbol: str, df: pd.DataFrame):
                 size_multiplier=1.05,
                 tp1_close_fraction=0.35,
                 tp2_close_fraction=0.50,
-                tp3_pct = max(0.06, float(row["atr_pct"]) * 7)
-
-                tp3_enabled = True
-                tp3_frac = 0.20
+                tp3_pct=max(0.06, float(row["atr_pct"]) * 7),
+                tp3_enabled=True,
+                tp3_close_fraction=0.20
             )
 
         return no_trade_signal(symbol, regime, "Breakout conditions not met")
@@ -201,9 +203,9 @@ def generate_signal(symbol: str, df: pd.DataFrame):
                 size_multiplier=0.85,
                 tp1_close_fraction=0.50,
                 tp2_close_fraction=0.50,
-                tp3_pct = 0.0
-                tp3_enabled = False
-                tp3_frac = 0.0
+                tp3_pct=0.0,
+                tp3_enabled=False,
+                tp3_close_fraction=0.0
             )
 
         return no_trade_signal(symbol, regime, "Range conditions not met")
@@ -230,10 +232,9 @@ def generate_signal(symbol: str, df: pd.DataFrame):
                 size_multiplier=0.70,
                 tp1_close_fraction=0.50,
                 tp2_close_fraction=0.50,
-                tp3_pct = max(0.03, float(row["atr_pct"]) * 4)
-
-                tp3_enabled = True
-                tp3_frac = 0.10
+                tp3_pct=max(0.03, float(row["atr_pct"]) * 4),
+                tp3_enabled=True,
+                tp3_close_fraction=0.10
             )
 
         return no_trade_signal(symbol, regime, "Chop conditions not met")

@@ -13,28 +13,28 @@ from risk import get_dynamic_capital
 
 
 app = Flask(__name__)
+ALLOWED_ORIGINS = [
+    o.strip()
+    for o in os.getenv(
+        "ALLOWED_ORIGINS",
+        "https://miner-bot-epc.caffeine.xyz,https://caffeine.ai"
+    ).split(",")
+    if o.strip()
+]
+
 CORS(
     app,
     resources={
-        r"/caffeine/*": {
-            "origins": [
-                "https://miner-bot-epc.caffeine.xyz",
-                "https://caffeine.ai",
-            ]
-        },
-        r"/*": {
-            "origins": [
-                "https://miner-bot-epc.caffeine.xyz",
-                "https://caffeine.ai",
-            ]
-        },
+        r"/caffeine/*": {"origins": ALLOWED_ORIGINS},
+        r"/*": {"origins": ALLOWED_ORIGINS},
     },
     supports_credentials=False,
 )
 
 BOT_THREAD_LOCK = threading.Lock()
 BOT_THREAD_STARTED = False
-BOT_THREAD_ENABLED = os.getenv("BOT_THREAD_ENABLED", "true").lower() in {"1","true","yes","on"}
+BOT_THREAD_ENABLED = os.getenv("BOT_THREAD_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
+
 
 class IgnoreCaffeineFilter(logging.Filter):
     def filter(self, record):
@@ -140,8 +140,8 @@ def caffeine_controls():
 
 @app.route("/caffeine/controls", methods=["POST"])
 def caffeine_controls_update():
-    data = request.get_json(silent=True) or {}
-    scope = (data.get("scope") or "GLOBAL").strip().upper()
+    data = request.get_json(force=True) or {}
+    scope = data.get("scope", "GLOBAL")
 
     enabled = data.get("enabled")
     flatten_on_disable = data.get("flatten_on_disable")

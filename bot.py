@@ -175,7 +175,7 @@ def run_bot():
                             position.get("stop_loss_pct", 0),
                             position.get("take_profit_pct", 0),
                             position.get("secondary_take_profit_pct", 0),
-                            0.0,
+                            None,  # preserve existing TP3 unless a real pct is supplied
                         )
                     except Exception as e:
                         print(f"[SYNC ERROR] {symbol}: {e}", flush=True)
@@ -253,6 +253,10 @@ def run_bot():
                         continue
 
                     strategy_mult = get_strategy_multiplier(cur, signal.strategy, signal.regime)
+                    combined_size_multiplier = max(
+                        0.0,
+                        float(getattr(signal, "size_multiplier", 1.0) or 1.0),
+                    )
                     size, deployed = calculate_position(
                         symbol=symbol,
                         price=price,
@@ -260,6 +264,7 @@ def run_bot():
                         stop_loss_pct=signal.stop_loss_pct,
                         confidence=signal.confidence,
                         regime_multiplier=strategy_mult,
+                        size_multiplier=combined_size_multiplier,
                     )
 
                     if size and size > 0:

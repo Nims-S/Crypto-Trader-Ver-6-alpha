@@ -57,6 +57,20 @@ def init_db():
         PRIMARY KEY (strategy, regime)
     )
     """)
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS trades (
+        id BIGSERIAL PRIMARY KEY,
+        symbol TEXT NOT NULL,
+        entry FLOAT NOT NULL,
+        exit FLOAT NOT NULL,
+        pnl FLOAT NOT NULL DEFAULT 0,
+        regime TEXT DEFAULT 'unknown',
+        reason TEXT DEFAULT '',
+        confidence FLOAT DEFAULT 0,
+        strategy TEXT DEFAULT 'unknown',
+        timestamp TIMESTAMP DEFAULT NOW()
+    )
+    """)
     cur.execute("ALTER TABLE positions ADD COLUMN IF NOT EXISTS direction TEXT DEFAULT 'LONG'")
     cur.execute("ALTER TABLE positions ADD COLUMN IF NOT EXISTS tp1_hit BOOLEAN DEFAULT FALSE")
     cur.execute("ALTER TABLE positions ADD COLUMN IF NOT EXISTS tp2_hit BOOLEAN DEFAULT FALSE")

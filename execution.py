@@ -1,4 +1,3 @@
-from math import isfinite
 from db import get_conn
 from utils import send_telegram
 from performance import log_trade_performance
@@ -37,6 +36,12 @@ def _normalize_levels(entry, sl, tp1, tp2, tp3, is_long):
             tp3 = min(tp3, tp2 - min_gap)
 
     return entry, sl, tp1, tp2, tp3
+
+
+def _bounded_close_size(remaining_size, requested_size):
+    remaining = max(0.0, float(remaining_size or 0.0))
+    requested = max(0.0, float(requested_size or 0.0))
+    return min(remaining, requested)
 
 
 # =========================
@@ -109,11 +114,27 @@ def manage_position(cur, position, price):
     tp1_hit = position["tp1_hit"]
     tp2_hit = position["tp2_hit"]
     tp3_hit = position["tp3_hit"]
+    regime = position.get("regime", "unknown")
+    confidence = float(position.get("confidence", 0) or 0)
+    strategy = position.get("strategy", "unknown")
+
+    def record_close(reason, close_price, closed_size):
+        closed_size = max(0.0, float(closed_size or 0.0))
+        if closed_size <= 0:
+            return
+
+        pnl = (float(close_price) - float(entry)) * closed_size if is_long else (float(entry) - float(close_price)) * closed_size
+        cur.execute("""
+            INSERT INTO trades (symbol, entry, exit, pnl, regime, reason, confidence, strategy)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        """, (symbol, entry, close_price, pnl, regime, reason, confidence, strategy))
+        log_trade_performance(strategy, regime, pnl)
 
     # =========================
     # STOP LOSS
     # =========================
     if (is_long and price <= sl) or (not is_long and price >= sl):
+        record_close("stop_loss", price, size)
         cur.execute("DELETE FROM positions WHERE symbol=%s", (symbol,))
         send_telegram(f"❌ SL HIT {symbol} at {price}")
         return
@@ -122,8 +143,9 @@ def manage_position(cur, position, price):
     # TP1
     # =========================
     if not tp1_hit and ((is_long and price >= tp1) or (not is_long and price <= tp1)):
-        close_size = original_size * position["tp1_close_fraction"]
+        close_size = _bounded_close_size(size, original_size * position["tp1_close_fraction"])
         size -= close_size
+        record_close("tp1", price, close_size)
 
         cur.execute("""
             UPDATE positions SET size=%s, tp1_hit=TRUE WHERE symbol=%s
@@ -135,8 +157,9 @@ def manage_position(cur, position, price):
     # TP2
     # =========================
     if not tp2_hit and ((is_long and price >= tp2) or (not is_long and price <= tp2)):
-        close_size = original_size * position["tp2_close_fraction"]
+        close_size = _bounded_close_size(size, original_size * position["tp2_close_fraction"])
         size -= close_size
+        record_close("tp2", price, close_size)
 
         cur.execute("""
             UPDATE positions SET size=%s, tp2_hit=TRUE WHERE symbol=%s
@@ -144,10 +167,16 @@ def manage_position(cur, position, price):
 
         send_telegram(f"✅ TP2 HIT {symbol} at {price}")
 
+    if size <= 0:
+        cur.execute("DELETE FROM positions WHERE symbol=%s", (symbol,))
+        send_telegram(f"🏁 FULLY CLOSED {symbol} at {price}")
+        return
+
     # =========================
     # TP3
     # =========================
     if tp3 and not tp3_hit and ((is_long and price >= tp3) or (not is_long and price <= tp3)):
+        record_close("tp3", price, size)
         cur.execute("DELETE FROM positions WHERE symbol=%s", (symbol,))
         send_telegram(f"🏁 TP3 HIT {symbol} at {price}")
         return
@@ -163,20 +192,23 @@ def update_position_levels(symbol, sl_pct, tp1_pct, tp2_pct, tp3_pct):
     conn = get_conn()
     cur = conn.cursor()
 
-    cur.execute("SELECT entry, direction FROM positions WHERE symbol=%s", (symbol,))
+    cur.execute("SELECT entry, direction, tp3 FROM positions WHERE symbol=%s", (symbol,))
     row = cur.fetchone()
 
     if not row:
         conn.close()
         return
 
-    entry, direction = row
+    entry, direction, current_tp3 = row
     is_long = (direction or "LONG").upper() == "LONG"
 
     sl = _sl_from_pct(entry, sl_pct, is_long)
     tp1 = _price_from_pct(entry, tp1_pct, is_long)
     tp2 = _price_from_pct(entry, tp2_pct, is_long)
-    tp3 = _price_from_pct(entry, tp3_pct, is_long) if tp3_pct > 0 else 0.0
+    if tp3_pct > 0:
+        tp3 = _price_from_pct(entry, tp3_pct, is_long)
+    else:
+        tp3 = float(current_tp3 or 0.0)
 
     entry, sl, tp1, tp2, tp3 = _normalize_levels(entry, sl, tp1, tp2, tp3, is_long)
 

@@ -231,22 +231,27 @@ def run_bot():
                             tp2_close_fraction=signal.tp2_close_fraction,
                             confidence=signal.confidence,
                         )
-
+                        print(f"[ENTRY] {symbol} | TP1={signal.take_profit_pct} | TP2={signal.secondary_take_profit_pct}", flush=True)
+                        tp2_display = (
+                            price * (1 + signal.secondary_take_profit_pct)
+                            if signal.secondary_take_profit_pct > 0
+                            else price * (1 + signal.take_profit_pct * 1.5)
+                        )
                         update_asset(
                             symbol=symbol,
                             regime=signal.regime,
                             strategy=signal.strategy,
                             signal={
-                                "side": signal.side,
-                                "confidence": signal.confidence,
+                                 "side": signal.side,
+                                 "confidence": signal.confidence,
                             },
                             position={
-                                "entry_price": price,
-                                "stop_loss": round(price * (1 - signal.stop_loss_pct), 4),
-                                "take_profit": round(price * (1 + signal.take_profit_pct), 4),
-                                "take_profit_2": round(price * (1 + signal.secondary_take_profit_pct), 4),
-                                "size": size,
-                                "strategy": signal.strategy,
+                                 "entry_price": price,
+                                 "stop_loss": round(price * (1 - signal.stop_loss_pct), 4),
+                                 "take_profit": round(price * (1 + signal.take_profit_pct), 4),
+                                 "take_profit_2": round(tp2_display, 4),
+                                 "size": size,
+                                 "strategy": signal.strategy,
                             },
                         )
                         last_trade_time[symbol] = now

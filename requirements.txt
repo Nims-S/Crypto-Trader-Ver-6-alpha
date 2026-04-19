@@ -6,3 +6,4 @@ websocket-client
 requests
 gunicorn
 Flask-Cors
+pytest

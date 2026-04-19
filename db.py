@@ -90,6 +90,26 @@ def init_db():
             ON CONFLICT (scope) DO NOTHING
         """, (scope,))
 
+    # ── strategy_controls ─────────────────────────────────────────────────────
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS strategy_controls (
+            strategy      TEXT PRIMARY KEY,
+            paused_until  TIMESTAMP,
+            pause_reason  TEXT DEFAULT '',
+            updated_at    TIMESTAMP NOT NULL DEFAULT NOW()
+        )
+    """)
+
+    # ── symbol_controls ───────────────────────────────────────────────────────
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS symbol_controls (
+            symbol        TEXT PRIMARY KEY,
+            cooldown_until TIMESTAMP,
+            cooldown_reason TEXT DEFAULT '',
+            updated_at    TIMESTAMP NOT NULL DEFAULT NOW()
+        )
+    """)
+
     # ── strategy_stats ────────────────────────────────────────────────────────
     cur.execute("""
         CREATE TABLE IF NOT EXISTS strategy_stats (

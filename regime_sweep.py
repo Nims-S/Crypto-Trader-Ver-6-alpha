@@ -33,7 +33,10 @@ def _patch_signal(allowed: set[str]):
             return None
         if "all" in allowed:
             return sig
-        return sig if sig.get("strategy") in allowed else None
+        # FIX: filter by regime, not strategy name
+        if sig.get("regime") in allowed:
+            return sig
+        return None
 
     return original_signal, filtered_signal
 
@@ -41,7 +44,7 @@ def _patch_signal(allowed: set[str]):
 def run_one(mode: str, regimes: tuple[str, ...], symbols: list[str], timeframe: str, start: str, end: str, train_start: str, train_end: str, test_start: str, test_end: str, capital: float, maker_fee_bps: float, taker_fee_bps: float, slippage_bps: float, slippage_atr_mult: float, latency_bars: int, trials: int, seed: int, no_cache: bool):
     allowed = set(regimes)
     original_signal, filtered_signal = _patch_signal(allowed)
-    bt.signal = filtered_signal  # monkey-patch bt.Engine's global lookup
+    bt.signal = filtered_signal
     try:
         cfg = bt.BacktestConfig(
             initial_capital=capital,
@@ -56,10 +59,7 @@ def run_one(mode: str, regimes: tuple[str, ...], symbols: list[str], timeframe: 
         )
 
         if mode == "backtest":
-            data = {
-                s: bt.load_history(s, timeframe, start, end, cache=not no_cache)
-                for s in symbols
-            }
+            data = {s: bt.load_history(s, timeframe, start, end, cache=not no_cache) for s in symbols}
             result = bt.Engine(cfg, bt.SignalParams()).run(data)
             payload = {
                 "regimes": list(regimes),
@@ -80,10 +80,8 @@ def run_one(mode: str, regimes: tuple[str, ...], symbols: list[str], timeframe: 
             print(json.dumps(payload, indent=2, default=str))
             return payload
 
-        data = {
-            s: bt.load_history(s, timeframe, train_start, test_end, cache=not no_cache)
-            for s in symbols
-        }
+        data = {s: bt.load_history(s, timeframe, train_start, test_end, cache=not no_cache) for s in symbols}
+
         if mode == "optimize":
             train = {
                 s: bt.prep(df[(df["timestamp"] >= bt.utc(train_start)) & (df["timestamp"] <= bt.utc(train_end))].reset_index(drop=True))
@@ -109,7 +107,6 @@ def run_one(mode: str, regimes: tuple[str, ...], symbols: list[str], timeframe: 
             print(json.dumps(payload, indent=2, default=str))
             return payload
 
-        # walkforward
         p, train_result, test_result, leaderboard = bt.walkforward(
             data, cfg, train_start, train_end, test_start, test_end, trials, seed
         )
@@ -170,7 +167,6 @@ def main():
     args = ap.parse_args()
 
     regimes = _normalize_regimes(args.regimes)
-    # run one regime set at a time; if multiple were passed, sweep them all
     sweep = regimes if "all" not in regimes and len(regimes) > 1 else (regimes,)
 
     outputs = []

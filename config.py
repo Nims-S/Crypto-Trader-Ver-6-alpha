@@ -1,6 +1,6 @@
 import os
 
-BOT_VERSION = "v6 alpha"
+BOT_VERSION = "v6 beta"
 
 SYMBOLS = ["BTC/USDT", "ETH/USDT", "SOL/USDT"]
 

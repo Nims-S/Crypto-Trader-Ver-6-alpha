@@ -1,4 +1,4 @@
-# Crypto-Trader Ver 6 Alpha
+# Crypto-Trader Ver 6 Beta
 
 Adaptive crypto trading bot with:
 - regime detection
@@ -10,12 +10,70 @@ Adaptive crypto trading bot with:
 
 This version is long-only and designed for spot-friendly execution.
 
+## Control semantics (deterministic)
+
+| State | Behavior |
+|------|--------|
+| enabled = true | normal trading |
+| enabled = false + flatten=false | stop new entries, manage existing |
+| enabled = false + flatten=true | immediately close all positions |
+
+These semantics are enforced in the runtime patch layer (sitecustomize).
+
+## Caffeine API contract
+
+### GET `/caffeine/state`
+
+Returns:
+```
+{
+  "assets": {...},
+  "controls": {...},
+  "last_update": "ISO",
+  "schema_version": 1
+}
+```
+
+### POST `/caffeine/controls`
+
+Request:
+```
+{
+  "scope": "BTC/USDT",
+  "enabled": false,
+  "flatten_on_disable": true
+}
+```
+
+Response:
+```
+{
+  "ok": true,
+  "controls": {...full snapshot...},
+  "schema_version": 1
+}
+```
+
+## Testing
+
+Basic invariant tests are included using pytest:
+
+```
+pip install -r requirements.txt
+pytest
+```
+
+Covers:
+- position sizing caps
+- TP/SL lifecycle safety
+- startup duplication guard
+
 ## Caffeine dashboard integration
 
-Set these environment variables in Render to connect outbound state pushes:
+Set these environment variables in Render:
 
-- `CAFFEINE_URL`: full ingest endpoint on your Caffeine app (for example `https://miner-bot-epc.caffeine.xyz/...`).
-- `CAFFEINE_TOKEN` (optional): bearer token, only if your Caffeine endpoint requires auth.
-- `ALLOWED_ORIGINS` (optional): comma-separated list of browser origins allowed for API CORS.
+- `CAFFEINE_URL`
+- `CAFFEINE_TOKEN` (optional)
+- `ALLOWED_ORIGINS` (optional)
 
-The bot now logs non-2xx responses from Caffeine so connection/auth problems are visible in Render logs.
+The bot logs non-2xx responses from Caffeine for debugging.

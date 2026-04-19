@@ -1,15 +1,9 @@
 """
 execution.py — position lifecycle management.
 
-Key fixes vs. previous version:
-  - update_position_levels() now accepts the caller's `cur` instead of
-    opening its own connection (phantom-write bug fix).
-  - log_trade_performance() receives `cur` and does not commit independently.
-  - Trailing stop is now live: SL moves up as price rises after TP1.
-  - Partial-close sizes are clamped to the current DB size to prevent negative
-    position sizes when price cascades through multiple TP levels in one tick.
-  - Size is re-read from DB after each partial close rather than relying on a
-    local variable that may be stale.
+Enhancements:
+  - Introduced force close helper for control-based flattening.
+  - Unified trade logging to avoid duplication across TP/SL paths.
 """
 
 from utils import send_telegram
@@ -43,6 +37,28 @@ def _normalize_levels(entry, sl, tp1, tp2, tp3, is_long):
         if tp3 > 0:
             tp3 = min(tp3, tp2 - min_gap)
     return entry, sl, tp1, tp2, tp3
+
+
+def _current_size(cur, symbol: str) -> float:
+    cur.execute("SELECT size FROM positions WHERE symbol=%s", (symbol,))
+    row = cur.fetchone()
+    return float(row[0]) if row else 0.0
+
+
+def _record_close(cur, symbol, entry, close_price, closed_size, is_long, regime, reason, confidence, strategy):
+    closed_size = max(0.0, float(closed_size or 0.0))
+    if closed_size <= 0:
+        return
+    pnl = (
+        (float(close_price) - entry) * closed_size
+        if is_long
+        else (entry - float(close_price)) * closed_size
+    )
+    cur.execute("""
+        INSERT INTO trades (symbol, entry, exit, pnl, regime, reason, confidence, strategy)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+    """, (symbol, entry, close_price, pnl, regime, reason, confidence, strategy))
+    log_trade_performance(cur, strategy, regime, pnl)
 
 
 # ── open position ─────────────────────────────────────────────────────────────
@@ -94,6 +110,27 @@ def open_position(
     )
 
 
+# ── force close (for controls / emergency exits) ──────────────────────────────
+
+def close_position(cur, position: dict, price: float, reason: str = "manual_close") -> bool:
+    symbol        = position["symbol"]
+    is_long       = position["direction"] == "LONG"
+    entry         = float(position["entry"])
+    regime        = position.get("regime", "unknown")
+    confidence    = float(position.get("confidence") or 0)
+    strategy      = position.get("strategy", "unknown")
+
+    size = _current_size(cur, symbol)
+    if size <= 0:
+        cur.execute("DELETE FROM positions WHERE symbol=%s", (symbol,))
+        return False
+
+    _record_close(cur, symbol, entry, price, size, is_long, regime, reason, confidence, strategy)
+    cur.execute("DELETE FROM positions WHERE symbol=%s", (symbol,))
+    send_telegram(f"🛑 CLOSE {symbol} | Reason={reason} | Exit={price:.4f}")
+    return True
+
+
 # ── manage position ───────────────────────────────────────────────────────────
 
 def manage_position(cur, position: dict, price: float) -> None:
@@ -113,32 +150,9 @@ def manage_position(cur, position: dict, price: float) -> None:
     strategy      = position.get("strategy", "unknown")
     trail_pct     = float(position.get("trail_pct") or 0)
 
-    def current_size() -> float:
-        """Re-read size from DB to avoid stale local state."""
-        cur.execute("SELECT size FROM positions WHERE symbol=%s", (symbol,))
-        row = cur.fetchone()
-        return float(row[0]) if row else 0.0
-
-    def record_close(reason: str, close_price: float, closed_size: float) -> None:
-        closed_size = max(0.0, float(closed_size or 0.0))
-        if closed_size <= 0:
-            return
-        pnl = (
-            (float(close_price) - entry) * closed_size
-            if is_long
-            else (entry - float(close_price)) * closed_size
-        )
-        cur.execute("""
-            INSERT INTO trades (symbol, entry, exit, pnl, regime, reason, confidence, strategy)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-        """, (symbol, entry, close_price, pnl, regime, reason, confidence, strategy))
-        log_trade_performance(cur, strategy, regime, pnl)
-
     # ── STOP LOSS ────────────────────────────────────────────────────────────
     if (is_long and price <= sl) or (not is_long and price >= sl):
-        size = current_size()
-        record_close("stop_loss", price, size)
-        cur.execute("DELETE FROM positions WHERE symbol=%s", (symbol,))
+        close_position(cur, position, price, reason="stop_loss")
         send_telegram(f"❌ SL HIT {symbol} at {price:.4f}")
         return
 
@@ -162,25 +176,25 @@ def manage_position(cur, position: dict, price: float) -> None:
     if not tp1_hit and (
         (is_long and price >= tp1) or (not is_long and price <= tp1)
     ):
-        size = current_size()
+        size = _current_size(cur, symbol)
         close_size = min(original_size * position["tp1_close_fraction"], size)
         new_size   = max(0.0, size - close_size)
-        record_close("tp1", price, close_size)
+        _record_close(cur, symbol, entry, price, close_size, is_long, regime, "tp1", confidence, strategy)
         cur.execute(
             "UPDATE positions SET size=%s, tp1_hit=TRUE, updated_at=NOW() WHERE symbol=%s",
             (new_size, symbol),
         )
         send_telegram(f"✅ TP1 HIT {symbol} at {price:.4f}")
-        tp1_hit = True  # prevent re-entry into this block this tick
+        tp1_hit = True
 
     # ── TP2 ──────────────────────────────────────────────────────────────────
     if not tp2_hit and (
         (is_long and price >= tp2) or (not is_long and price <= tp2)
     ):
-        size = current_size()
+        size = _current_size(cur, symbol)
         close_size = min(original_size * position["tp2_close_fraction"], size)
         new_size   = max(0.0, size - close_size)
-        record_close("tp2", price, close_size)
+        _record_close(cur, symbol, entry, price, close_size, is_long, regime, "tp2", confidence, strategy)
         cur.execute(
             "UPDATE positions SET size=%s, tp2_hit=TRUE, updated_at=NOW() WHERE symbol=%s",
             (new_size, symbol),
@@ -192,9 +206,7 @@ def manage_position(cur, position: dict, price: float) -> None:
     if tp3 and not tp3_hit and (
         (is_long and price >= tp3) or (not is_long and price <= tp3)
     ):
-        size = current_size()
-        record_close("tp3", price, size)
-        cur.execute("DELETE FROM positions WHERE symbol=%s", (symbol,))
+        close_position(cur, position, price, reason="tp3")
         send_telegram(f"🏁 TP3 HIT {symbol} at {price:.4f}")
         return
 
@@ -202,19 +214,13 @@ def manage_position(cur, position: dict, price: float) -> None:
 # ── resync position levels ────────────────────────────────────────────────────
 
 def update_position_levels(
-    cur,          # ← caller's cursor; no independent connection opened here
+    cur,
     symbol: str,
     sl_pct: float,
     tp1_pct: float,
     tp2_pct: float,
     tp3_pct: float | None,
 ) -> None:
-    """
-    Force-update SL/TP levels for an existing position.
-
-    Uses the caller's cursor so it participates in the caller's transaction —
-    changes are rolled back automatically if the outer transaction fails.
-    """
     cur.execute(
         "SELECT entry, direction, tp3 FROM positions WHERE symbol=%s", (symbol,)
     )

@@ -110,7 +110,9 @@ def home():
 
 @app.route("/caffeine/state")
 def caffeine_state():
-    return jsonify(get_state())
+    state = get_state()
+    state["schema_version"] = 1
+    return jsonify(state)
 
 
 @app.route("/caffeine/controls", methods=["GET"])
@@ -128,8 +130,8 @@ def caffeine_controls_update():
     if enabled is None and flatten_on_disable is None:
         return jsonify({"error": "nothing to update"}), 400
 
-    set_control(scope=scope, enabled=enabled, flatten_on_disable=flatten_on_disable)
-    return jsonify({"ok": True})
+    snapshot = set_control(scope=scope, enabled=enabled, flatten_on_disable=flatten_on_disable)
+    return jsonify({"ok": True, "controls": snapshot, "schema_version": 1})
 
 
 @app.route("/health")

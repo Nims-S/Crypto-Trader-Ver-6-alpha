@@ -2,12 +2,12 @@
 execution.py — position lifecycle management.
 
 Enhancements:
-  - Introduced force close helper for control-based flattening.
-  - Unified trade logging to avoid duplication across TP/SL paths.
+  - Strategy auto-pause and symbol cooldown after losses
 """
 
 from utils import send_telegram
 from performance import log_trade_performance
+from risk import maybe_pause_symbol, evaluate_strategy_pause
 
 
 # ── price helpers ─────────────────────────────────────────────────────────────
@@ -21,7 +21,7 @@ def _sl_from_pct(entry: float, pct: float, is_long: bool) -> float:
 
 
 def _normalize_levels(entry, sl, tp1, tp2, tp3, is_long):
-    min_gap = entry * 0.0025  # 0.25 %
+    min_gap = entry * 0.0025
     if is_long:
         if sl >= entry:
             sl = entry - min_gap
@@ -48,17 +48,30 @@ def _current_size(cur, symbol: str) -> float:
 def _record_close(cur, symbol, entry, close_price, closed_size, is_long, regime, reason, confidence, strategy):
     closed_size = max(0.0, float(closed_size or 0.0))
     if closed_size <= 0:
-        return
+        return 0.0
+
     pnl = (
         (float(close_price) - entry) * closed_size
         if is_long
         else (entry - float(close_price)) * closed_size
     )
+
     cur.execute("""
         INSERT INTO trades (symbol, entry, exit, pnl, regime, reason, confidence, strategy)
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
     """, (symbol, entry, close_price, pnl, regime, reason, confidence, strategy))
+
     log_trade_performance(cur, strategy, regime, pnl)
+
+    # ── dynamic risk reactions ───────────────────────────────────────────────
+    try:
+        evaluate_strategy_pause(cur, strategy)
+        if pnl <= 0:
+            maybe_pause_symbol(cur, symbol)
+    except Exception as e:
+        print(f"[RISK HOOK ERROR] {symbol}: {e}", flush=True)
+
+    return pnl
 
 
 # ── open position ─────────────────────────────────────────────────────────────
@@ -110,7 +123,7 @@ def open_position(
     )
 
 
-# ── force close (for controls / emergency exits) ──────────────────────────────
+# ── force close ──────────────────────────────────────────────────────────────
 
 def close_position(cur, position: dict, price: float, reason: str = "manual_close") -> bool:
     symbol        = position["symbol"]
@@ -125,8 +138,9 @@ def close_position(cur, position: dict, price: float, reason: str = "manual_clos
         cur.execute("DELETE FROM positions WHERE symbol=%s", (symbol,))
         return False
 
-    _record_close(cur, symbol, entry, price, size, is_long, regime, reason, confidence, strategy)
+    pnl = _record_close(cur, symbol, entry, price, size, is_long, regime, reason, confidence, strategy)
     cur.execute("DELETE FROM positions WHERE symbol=%s", (symbol,))
+
     send_telegram(f"🛑 CLOSE {symbol} | Reason={reason} | Exit={price:.4f}")
     return True
 
@@ -156,7 +170,7 @@ def manage_position(cur, position: dict, price: float) -> None:
         send_telegram(f"❌ SL HIT {symbol} at {price:.4f}")
         return
 
-    # ── TRAILING STOP (activates after TP1 is hit) ───────────────────────────
+    # ── TRAILING STOP ────────────────────────────────────────────────────────
     if tp1_hit and trail_pct > 0:
         new_trail_sl = (
             price * (1 - trail_pct) if is_long else price * (1 + trail_pct)
@@ -202,7 +216,7 @@ def manage_position(cur, position: dict, price: float) -> None:
         send_telegram(f"✅ TP2 HIT {symbol} at {price:.4f}")
         tp2_hit = True
 
-    # ── TP3 (full close of remainder) ────────────────────────────────────────
+    # ── TP3 ──────────────────────────────────────────────────────────────────
     if tp3 and not tp3_hit and (
         (is_long and price >= tp3) or (not is_long and price <= tp3)
     ):
@@ -211,7 +225,7 @@ def manage_position(cur, position: dict, price: float) -> None:
         return
 
 
-# ── resync position levels ────────────────────────────────────────────────────
+# ── resync levels ────────────────────────────────────────────────────────────
 
 def update_position_levels(
     cur,

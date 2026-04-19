@@ -3,6 +3,7 @@ from datetime import datetime
 
 import json
 
+from config import SYMBOLS
 from db import get_conn
 
 print("✅ STATE.PY LOADED", flush=True)
@@ -11,9 +12,26 @@ STATE = {
     "assets": {}
 }
 
+CONTROL_SCOPES = {"GLOBAL", *SYMBOLS}
+
 
 def normalize_scope(scope):
     return (scope or "GLOBAL").strip().upper()
+
+
+def _default_control_row():
+    return {
+        "enabled": True,
+        "flatten_on_disable": False,
+        "updated_at": None,
+    }
+
+
+def _validate_scope(scope):
+    scope = normalize_scope(scope)
+    if scope not in CONTROL_SCOPES:
+        raise ValueError(f"unknown control scope: {scope}")
+    return scope
 
 
 def update_asset(symbol, regime, strategy, signal=None, position=None):
@@ -62,18 +80,22 @@ def get_controls():
         for r in rows
     }
 
-    if "GLOBAL" not in controls:
-        controls["GLOBAL"] = {
-            "enabled": True,
-            "flatten_on_disable": False,
-            "updated_at": None,
-        }
+    for scope in CONTROL_SCOPES:
+        controls.setdefault(scope, _default_control_row())
 
     return controls
 
 
 def set_control(scope, enabled=None, flatten_on_disable=None):
-    scope = normalize_scope(scope)
+    scope = _validate_scope(scope)
+
+    if enabled is None and flatten_on_disable is None:
+        return get_controls()
+
+    # Use concrete INSERT values so a partial update on a brand-new scope still
+    # satisfies NOT NULL columns while the UPDATE branch preserves existing data.
+    insert_enabled = True if enabled is None else bool(enabled)
+    insert_flatten = False if flatten_on_disable is None else bool(flatten_on_disable)
 
     conn = get_conn()
     cur = conn.cursor()
@@ -83,13 +105,14 @@ def set_control(scope, enabled=None, flatten_on_disable=None):
         VALUES (%s, %s, %s)
         ON CONFLICT (scope)
         DO UPDATE SET
-            enabled = COALESCE(EXCLUDED.enabled, trade_controls.enabled),
-            flatten_on_disable = COALESCE(EXCLUDED.flatten_on_disable, trade_controls.flatten_on_disable),
+            enabled = COALESCE(%s, trade_controls.enabled),
+            flatten_on_disable = COALESCE(%s, trade_controls.flatten_on_disable),
             updated_at = NOW()
-    """, (scope, enabled, flatten_on_disable))
+    """, (scope, insert_enabled, insert_flatten, enabled, flatten_on_disable))
 
     conn.commit()
     conn.close()
+    return get_controls()
 
 
 def get_state():

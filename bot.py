@@ -1,13 +1,5 @@
 """
-bot.py — main trading loop.
-
-Key fixes vs. previous version:
-  - OHLCV data is cached with a TTL so Binance is not hammered every 3 s.
-  - active_trades is re-queried from DB at the point of entry check (not stale
-    in-memory counter).
-  - update_position_levels() now receives the shared cursor, not a symbol-only
-    call that opened its own connection.
-  - Advisory lock is held for the process lifetime in main.py (see main.py).
+bot.py — main trading loop with enhanced risk controls.
 """
 
 import time
@@ -28,7 +20,15 @@ from config import (
 from db import get_conn
 from execution import manage_position, open_position, update_position_levels
 from price_feed import feeds
-from risk import calculate_position, get_dynamic_capital, get_strategy_multiplier, risk_gate
+from risk import (
+    calculate_position,
+    get_dynamic_capital,
+    get_strategy_multiplier,
+    risk_gate,
+    evaluate_strategy_pause,
+    get_strategy_pause,
+    get_symbol_cooldown,
+)
 from state import get_state, update_asset, get_controls
 from strategy import compute_indicators, generate_signal
 
@@ -42,11 +42,8 @@ except Exception as e:
     print(f"[EXCHANGE WARN] load_markets failed: {e}", flush=True)
 
 
-# ── OHLCV cache ───────────────────────────────────────────────────────────────
-# Fetch at most once per CANDLE_CACHE_TTL seconds per symbol.
-# On a 15-minute timeframe a 60-second TTL is already 4× faster than needed.
 _candle_cache: dict[str, tuple[float, pd.DataFrame]] = {}
-CANDLE_CACHE_TTL = 60  # seconds
+CANDLE_CACHE_TTL = 60
 
 
 def fetch_historical_data(symbol: str) -> pd.DataFrame:
@@ -65,10 +62,8 @@ def fetch_historical_data(symbol: str) -> pd.DataFrame:
         return df
     except Exception as e:
         print(f"[FETCH ERROR] {symbol}: {e}", flush=True)
-        return cached_df  # return stale data rather than nothing on transient error
+        return cached_df
 
-
-# ── position loader ───────────────────────────────────────────────────────────
 
 def load_position(cur, symbol: str):
     cur.execute("""
@@ -125,10 +120,8 @@ def build_position_state(position):
     }
 
 
-# ── main loop ─────────────────────────────────────────────────────────────────
-
 def run_bot():
-    print("[BOT] LOOP STARTED (v6 hardened)", flush=True)
+    print("[BOT] LOOP STARTED (v6 hardened++)", flush=True)
     last_trade_time: dict[str, float] = {}
 
     while True:
@@ -155,32 +148,38 @@ def run_bot():
                 if feed is None:
                     continue
 
+                price = None
                 try:
                     price = feed.get_price()
                 except Exception as e:
                     print(f"[FEED ERROR] {symbol}: {e}", flush=True)
-                    continue
 
-                if price is None or price <= 0:
+                # ── data health gate ────────────────────────────────────────
+                if price is None or price <= 0 or getattr(feed, "is_stale", lambda *_: False)(20):
+                    update_asset(
+                        symbol=symbol,
+                        regime="data_stale",
+                        strategy="feed_unavailable",
+                        signal=None,
+                        position=None,
+                    )
                     continue
 
                 position = load_position(cur, symbol)
 
-                # ── resync levels if position exists ─────────────────────────
                 if position:
                     try:
                         update_position_levels(
-                            cur,   # ← shared cursor (no rogue connection)
+                            cur,
                             symbol,
                             position.get("stop_loss_pct", 0),
                             position.get("take_profit_pct", 0),
                             position.get("secondary_take_profit_pct", 0),
-                            None,  # preserve existing TP3 unless a real pct is supplied
+                            None,
                         )
                     except Exception as e:
                         print(f"[SYNC ERROR] {symbol}: {e}", flush=True)
 
-                # ── kill-switch / controls ───────────────────────────────────
                 controls      = get_controls()
                 global_ctrl   = controls.get("GLOBAL", {})
                 symbol_ctrl   = controls.get(symbol, {})
@@ -193,34 +192,28 @@ def run_bot():
                     position = load_position(cur, symbol)
 
                 if blocked:
-                    update_asset(
-                        symbol=symbol,
-                        regime="paused",
-                        strategy="kill_switch",
-                        signal=None,
-                        position=build_position_state(position),
-                    )
+                    update_asset(symbol, "paused", "kill_switch", None, build_position_state(position))
                     continue
 
-                # ── data + signal ────────────────────────────────────────────
                 df = fetch_historical_data(symbol)
                 if df.empty:
-                    update_asset(
-                        symbol=symbol,
-                        regime="unknown",
-                        strategy="data_unavailable",
-                        signal=None,
-                        position=build_position_state(position),
-                    )
+                    update_asset(symbol, "unknown", "data_unavailable", None, build_position_state(position))
                     continue
 
                 signal = generate_signal(symbol, df)
 
+                # ── strategy pause check ────────────────────────────────────
                 if signal and signal.strategy != "no_trade":
-                    print(
-                        f"[SIGNAL] {symbol} | {signal.strategy} | conf={signal.confidence:.2f}",
-                        flush=True,
-                    )
+                    pause = evaluate_strategy_pause(cur, signal.strategy)
+                    if pause:
+                        update_asset(symbol, "paused", "strategy_paused", None, build_position_state(position))
+                        continue
+
+                # ── symbol cooldown check ───────────────────────────────────
+                cooldown = get_symbol_cooldown(cur, symbol)
+                if cooldown:
+                    update_asset(symbol, "paused", "symbol_cooldown", None, build_position_state(position))
+                    continue
 
                 update_asset(
                     symbol=symbol,
@@ -233,14 +226,12 @@ def run_bot():
                     position=build_position_state(position),
                 )
 
-                # ── entry ────────────────────────────────────────────────────
                 if (
                     signal
                     and signal.side == "LONG"
                     and signal.strategy != "no_trade"
                     and not position
                 ):
-                    # Re-query active count from DB (not a stale in-memory counter)
                     cur.execute("SELECT COUNT(*) FROM positions")
                     active_trades = int(cur.fetchone()[0] or 0)
                     if active_trades >= MAX_POSITIONS:
@@ -253,10 +244,6 @@ def run_bot():
                         continue
 
                     strategy_mult = get_strategy_multiplier(cur, signal.strategy, signal.regime)
-                    combined_size_multiplier = max(
-                        0.0,
-                        float(getattr(signal, "size_multiplier", 1.0) or 1.0),
-                    )
                     size, deployed = calculate_position(
                         symbol=symbol,
                         price=price,
@@ -264,7 +251,7 @@ def run_bot():
                         stop_loss_pct=signal.stop_loss_pct,
                         confidence=signal.confidence,
                         regime_multiplier=strategy_mult,
-                        size_multiplier=combined_size_multiplier,
+                        size_multiplier=float(getattr(signal, "size_multiplier", 1.0) or 1.0),
                     )
 
                     if size and size > 0:
@@ -295,9 +282,7 @@ def run_bot():
             try:
                 state = get_state()
                 if state.get("assets"):
-                    pushed = push_to_caffeine(state)
-                    if not pushed:
-                        print("[CAFFEINE PUSH] Not delivered", flush=True)
+                    push_to_caffeine(state)
             except Exception as e:
                 print(f"[CAFFEINE ERROR] {e}", flush=True)
 

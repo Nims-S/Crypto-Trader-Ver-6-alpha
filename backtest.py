@@ -286,10 +286,10 @@ class Engine:
         self.cash -= fee
         self.total_fees += fee
         self.total_slip += abs(price - float(bar["open"])) * qty
-        self.positions[sym] = Position(sym, idx, bar["timestamp"], price, qty, qty, sig["strategy"], sig["regime"],
+        self.positions[sym] = Position(sym, idx, bar.name, price, qty, qty, sig["strategy"], sig["regime"],
                                        price * (1 - sig["stop_loss_pct"]), price * (1 + sig["take_profit_pct"]), price * (1 + sig["secondary_take_profit_pct"]), price * (1 + float(sig["tp3_pct"] or 0)),
                                        float(sig["trail_pct"]), float(sig["tp1_close_fraction"]), float(sig["tp2_close_fraction"]), float(sig["tp3_close_fraction"]), float(sig["confidence"]), high=price)
-        self.trades.append({"type": "entry", "timestamp": str(bar["timestamp"]), "symbol": sym, "price": price, "qty": qty, "fee": fee, "strategy": sig["strategy"]})
+        self.trades.append({"type": "entry", "timestamp": str(bar.name), "symbol": sym, "price": price, "qty": qty, "fee": fee, "strategy": sig["strategy"]})
 
     def _close(self, sym, bar, pos, price, qty, reason, kind):
         if qty <= 0:
@@ -301,7 +301,7 @@ class Engine:
         self.cash += pnl
         self.total_fees += fee
         self.total_slip += abs(fill - price) * qty
-        self.trades.append({"type": "exit", "timestamp": str(bar["timestamp"]), "symbol": sym, "price": fill, "qty": qty, "fee": fee, "pnl": pnl, "reason": reason, "strategy": pos.strategy})
+        self.trades.append({"type": "exit", "timestamp": str(bar.name), "symbol": sym, "price": fill, "qty": qty, "fee": fee, "pnl": pnl, "reason": reason, "strategy": pos.strategy})
         pos.qty -= qty
 
     def _manage(self, sym, bar):

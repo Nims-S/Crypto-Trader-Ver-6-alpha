@@ -1,3 +1,4 @@
+print("RUNNING UPDATED BACKTEST FILE")
 from __future__ import annotations
 
 import argparse, json, math, random

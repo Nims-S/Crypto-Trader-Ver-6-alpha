@@ -4,6 +4,7 @@ import threading
 import time
 import requests
 
+
 class PriceFeedManager:
     def __init__(self, symbol):
         self.symbol = symbol.lower()
@@ -13,9 +14,19 @@ class PriceFeedManager:
         self.last_update = 0
 
     def get_price(self):
+        # refresh via REST if stale
         if time.time() - self.last_update > 5:
             self._fetch_rest_price()
         return self.price
+
+    def age_seconds(self):
+        if not self.last_update:
+            return None
+        return time.time() - self.last_update
+
+    def is_stale(self, max_age_seconds: int = 20):
+        age = self.age_seconds()
+        return age is not None and age > max_age_seconds
 
     def _fetch_rest_price(self):
         try:

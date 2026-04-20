@@ -186,16 +186,19 @@ def load_history(symbol: str, timeframe: str, start: str, end: str, cache: bool 
 
 
 def _safe_indicator_columns(df: pd.DataFrame) -> pd.DataFrame:
-    """Guarantee all fields used by signal() exist, even if strategy.py is older.
-
-    This keeps backtest and live logic compatible across repo versions.
-    """
+    """Guarantee all fields used by signal() exist, even if strategy.py is older."""
     df = df.copy()
 
     if "high_20" not in df.columns:
         df["high_20"] = df["high"].rolling(20).max()
     if "low_20" not in df.columns:
         df["low_20"] = df["low"].rolling(20).min()
+    if "bb_upper" not in df.columns or "bb_lower" not in df.columns or "bb_width" not in df.columns:
+        mid = df["close"].rolling(20).mean()
+        std = df["close"].rolling(20).std()
+        df["bb_upper"] = mid + 2 * std
+        df["bb_lower"] = mid - 2 * std
+        df["bb_width"] = (df["bb_upper"] - df["bb_lower"]) / mid
     if "trend_strength" not in df.columns:
         if "ema20" in df.columns and "ema50" in df.columns:
             df["trend_strength"] = (df["ema20"] - df["ema50"]).abs() / df["close"]

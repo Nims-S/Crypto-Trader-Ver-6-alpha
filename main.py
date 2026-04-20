@@ -138,7 +138,21 @@ def caffeine_controls_update():
 def health():
     return jsonify({"status": "alive", "version": BOT_VERSION})
 
+@app.route("/sync_levels", methods=["POST"])
+def sync_levels():
+    conn = get_conn()
+    cur = conn.cursor()
 
+    cur.execute("SELECT symbol FROM positions")
+    symbols = [r[0] for r in cur.fetchall()]
+
+    for symbol in symbols:
+        # fetch position + call update_position_levels
+        pass
+
+    conn.commit()
+    return {"status": "synced"}
+    
 @app.route("/reset", methods=["POST"])
 def reset():
     if RESET_TOKEN:

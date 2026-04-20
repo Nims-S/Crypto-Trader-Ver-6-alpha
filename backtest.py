@@ -185,6 +185,26 @@ def load_history(symbol: str, timeframe: str, start: str, end: str, cache: bool 
     return df
 
 
+def _safe_indicator_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Guarantee all fields used by signal() exist, even if strategy.py is older.
+
+    This keeps backtest and live logic compatible across repo versions.
+    """
+    df = df.copy()
+
+    if "high_20" not in df.columns:
+        df["high_20"] = df["high"].rolling(20).max()
+    if "low_20" not in df.columns:
+        df["low_20"] = df["low"].rolling(20).min()
+    if "trend_strength" not in df.columns:
+        if "ema20" in df.columns and "ema50" in df.columns:
+            df["trend_strength"] = (df["ema20"] - df["ema50"]).abs() / df["close"]
+        else:
+            df["trend_strength"] = np.nan
+
+    return df
+
+
 def prep(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     if compute_indicators:
@@ -213,6 +233,8 @@ def prep(df: pd.DataFrame) -> pd.DataFrame:
         df["high_20"] = df["high"].rolling(20).max()
         df["low_20"] = df["low"].rolling(20).min()
         df["trend_strength"] = (df["ema20"] - df["ema50"]).abs() / df["close"]
+
+    df = _safe_indicator_columns(df)
     return df.dropna().reset_index(drop=True)
 
 
@@ -459,25 +481,21 @@ class Engine:
         o = float(bar["open"])
         pos.high = max(pos.high, h)
 
-        # stop loss first
         if l <= pos.sl:
             self._close(sym, bar, pos, pos.sl, pos.qty, "stop_loss", "sl")
             if pos.qty <= 1e-12:
                 self.positions.pop(sym, None)
             return
 
-        # trailing stop after TP1
         if pos.tp1_hit and pos.trail_pct > 0:
             pos.sl = max(pos.sl, h * (1 - pos.trail_pct))
 
-        # TP1
         if not pos.tp1_hit and h >= pos.tp1:
             q = min(pos.original_qty * pos.tp1_frac, pos.qty)
             self._close(sym, bar, pos, pos.tp1, q, "tp1", "tp")
             pos.tp1_hit = True
             pos.sl = max(pos.sl, pos.entry)
 
-        # TP2
         if sym in self.positions:
             p2 = self.positions[sym]
             if not p2.tp2_hit and h >= p2.tp2:
@@ -485,7 +503,6 @@ class Engine:
                 self._close(sym, bar, p2, p2.tp2, q, "tp2", "tp")
                 p2.tp2_hit = True
 
-        # TP3
         if sym in self.positions:
             p3 = self.positions[sym]
             if p3.tp3 > 0 and not p3.tp3_hit and h >= p3.tp3:
@@ -503,7 +520,6 @@ class Engine:
         for ts in timeline:
             prices = {}
 
-            # manage existing positions using current bar data
             for s in frames:
                 if ts not in mmap[s].index:
                     continue
@@ -516,7 +532,6 @@ class Engine:
             equity = self.cash + sum(prices.get(s, p.high) * p.qty for s, p in self.positions.items())
             self.equity.append((str(ts), float(equity)))
 
-            # queue new signals
             for s, df in frames.items():
                 if ts not in mmap[s].index:
                     continue
@@ -529,7 +544,6 @@ class Engine:
                     if ex < len(df):
                         self.pending.setdefault(s, []).append((ex, sig))
 
-            # execute queued orders
             for s, q in list(self.pending.items()):
                 if s not in frames or not q:
                     continue
@@ -544,7 +558,6 @@ class Engine:
                         remain.append((ex, sig))
                 self.pending[s] = remain
 
-        # close anything left at end-of-data
         for s, p in list(self.positions.items()):
             last = frames[s].iloc[-1]
             self._close(s, last, p, float(last["close"]), p.qty, "eod", "tp")

@@ -10,7 +10,6 @@ def init_db():
     conn = get_conn()
     cur = conn.cursor()
 
-    # ── positions: full schema defined upfront ──────────────────────────────
     cur.execute("""
         CREATE TABLE IF NOT EXISTS positions (
             symbol                      TEXT PRIMARY KEY,
@@ -29,6 +28,7 @@ def init_db():
             take_profit_pct             FLOAT   DEFAULT 0,
             secondary_take_profit_pct   FLOAT   DEFAULT 0,
             trail_pct                   FLOAT   DEFAULT 0,
+            trail_atr_mult              FLOAT   DEFAULT 0,
             tp1_close_fraction          FLOAT   DEFAULT 0.33,
             tp2_close_fraction          FLOAT   DEFAULT 0.5,
             tp3_close_fraction          NUMERIC,
@@ -40,7 +40,6 @@ def init_db():
         )
     """)
 
-    # ── trades ───────────────────────────────────────────────────────────────
     cur.execute("""
         CREATE TABLE IF NOT EXISTS trades (
             id          BIGSERIAL PRIMARY KEY,
@@ -55,13 +54,12 @@ def init_db():
             timestamp   TIMESTAMP DEFAULT NOW()
         )
     """)
-    # Index for the daily/weekly PnL queries in risk_gate()
+
     cur.execute("""
         CREATE INDEX IF NOT EXISTS idx_trades_timestamp
         ON trades(timestamp DESC)
     """)
 
-    # ── asset_state ───────────────────────────────────────────────────────────
     cur.execute("""
         CREATE TABLE IF NOT EXISTS asset_state (
             symbol     TEXT PRIMARY KEY,
@@ -73,7 +71,6 @@ def init_db():
         )
     """)
 
-    # ── trade_controls ────────────────────────────────────────────────────────
     cur.execute("""
         CREATE TABLE IF NOT EXISTS trade_controls (
             scope              TEXT PRIMARY KEY,
@@ -82,7 +79,7 @@ def init_db():
             updated_at         TIMESTAMP NOT NULL DEFAULT NOW()
         )
     """)
-    # Seed controls from config so they stay in sync automatically
+
     for scope in ["GLOBAL"] + list(SYMBOLS):
         cur.execute("""
             INSERT INTO trade_controls (scope, enabled, flatten_on_disable)
@@ -90,7 +87,6 @@ def init_db():
             ON CONFLICT (scope) DO NOTHING
         """, (scope,))
 
-    # ── strategy_controls ─────────────────────────────────────────────────────
     cur.execute("""
         CREATE TABLE IF NOT EXISTS strategy_controls (
             strategy      TEXT PRIMARY KEY,
@@ -100,7 +96,6 @@ def init_db():
         )
     """)
 
-    # ── symbol_controls ───────────────────────────────────────────────────────
     cur.execute("""
         CREATE TABLE IF NOT EXISTS symbol_controls (
             symbol        TEXT PRIMARY KEY,
@@ -110,7 +105,6 @@ def init_db():
         )
     """)
 
-    # ── strategy_stats ────────────────────────────────────────────────────────
     cur.execute("""
         CREATE TABLE IF NOT EXISTS strategy_stats (
             strategy     TEXT,
@@ -123,7 +117,6 @@ def init_db():
         )
     """)
 
-    # ── safe incremental migrations for existing deployments ─────────────────
     safe_migrations = [
         ("positions", "tp2",                       "FLOAT"),
         ("positions", "tp3",                       "NUMERIC"),
@@ -133,6 +126,7 @@ def init_db():
         ("positions", "take_profit_pct",           "FLOAT DEFAULT 0"),
         ("positions", "secondary_take_profit_pct", "FLOAT DEFAULT 0"),
         ("positions", "trail_pct",                 "FLOAT DEFAULT 0"),
+        ("positions", "trail_atr_mult",            "FLOAT DEFAULT 0"),
         ("positions", "tp1_close_fraction",        "FLOAT DEFAULT 0.33"),
         ("positions", "tp2_close_fraction",        "FLOAT DEFAULT 0.5"),
         ("positions", "tp3_close_fraction",        "NUMERIC"),

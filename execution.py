@@ -235,17 +235,26 @@ def update_position_levels(
     tp2_pct: float,
     tp3_pct: float | None,
 ) -> None:
+    # Preserve any already-tightened stop loss. Recomputing a fresh SL on every
+    # loop would wipe out trailing stops and make a position appear "past SL"
+    # without actually closing.
     cur.execute(
-        "SELECT entry, direction, tp3 FROM positions WHERE symbol=%s", (symbol,)
+        "SELECT entry, direction, tp3, sl FROM positions WHERE symbol=%s", (symbol,)
     )
     row = cur.fetchone()
     if not row:
         return
 
-    entry, direction, current_tp3 = row
+    entry, direction, current_tp3, current_sl = row
     is_long = (direction or "LONG").upper() == "LONG"
 
-    sl  = _sl_from_pct(entry, sl_pct, is_long)
+    calculated_sl = _sl_from_pct(entry, sl_pct, is_long)
+    if current_sl is None:
+        sl = calculated_sl
+    else:
+        current_sl = float(current_sl)
+        sl = max(current_sl, calculated_sl) if is_long else min(current_sl, calculated_sl)
+
     tp1 = _price_from_pct(entry, tp1_pct, is_long)
     tp2 = _price_from_pct(entry, tp2_pct, is_long)
 

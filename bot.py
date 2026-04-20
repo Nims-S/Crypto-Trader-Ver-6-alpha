@@ -18,7 +18,7 @@ from config import (
     SYMBOLS,
 )
 from db import get_conn
-from execution import manage_position, open_position, update_position_levels
+from execution import manage_position, open_position
 from price_feed import feeds
 from risk import (
     calculate_position,
@@ -166,19 +166,6 @@ def run_bot():
                     continue
 
                 position = load_position(cur, symbol)
-
-                if position:
-                    try:
-                        update_position_levels(
-                            cur,
-                            symbol,
-                            position.get("stop_loss_pct", 0),
-                            position.get("take_profit_pct", 0),
-                            position.get("secondary_take_profit_pct", 0),
-                            None,
-                        )
-                    except Exception as e:
-                        print(f"[SYNC ERROR] {symbol}: {e}", flush=True)
 
                 controls      = get_controls()
                 global_ctrl   = controls.get("GLOBAL", {})

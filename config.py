@@ -14,6 +14,13 @@ MAX_COOLDOWN_SECONDS = int(os.getenv("MAX_COOLDOWN_SECONDS", 900))
 DEFAULT_TIMEFRAME = os.getenv("DEFAULT_TIMEFRAME", "1m")
 CANDLE_LIMIT = int(os.getenv("CANDLE_LIMIT", 200))
 
+# Hard regime gate for live trading. Start with trend-only, then widen later.
+ALLOWED_REGIMES = {
+    r.strip().lower()
+    for r in os.getenv("ALLOWED_REGIMES", "trend").split(",")
+    if r.strip()
+}
+
 # Allocation caps keep the bot from overconcentrating even when volatility is low.
 ALLOCATION = {
     "BTC/USDT": float(os.getenv("BTC_ALLOCATION", 0.40)),

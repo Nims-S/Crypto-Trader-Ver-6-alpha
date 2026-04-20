@@ -24,9 +24,10 @@ class TradeSignal:
     take_profit_pct:            float
     secondary_take_profit_pct:  float
     trail_pct:                  float
-    size_multiplier:            float
-    tp1_close_fraction:         float
-    tp2_close_fraction:         float
+    trail_atr_mult:             float = 0.0
+    size_multiplier:            float = 1.0
+    tp1_close_fraction:         float = 0.0
+    tp2_close_fraction:         float = 0.0
     tp3_pct:                    float = 0.0
     tp3_enabled:                bool  = False
     tp3_close_fraction:         float = 0.0
@@ -48,6 +49,19 @@ def _volatility_size_multiplier(
     return _cap(base * vol_scale, 0.45, 1.25)
 
 
+def _trail_atr_multiplier(symbol: str, regime: Regime) -> float:
+    sym = (symbol or "").upper()
+
+    if sym == "BTC/USDT":
+        return 1.18 if regime in {Regime.TREND, Regime.BREAKOUT} else 1.10
+    if sym == "ETH/USDT":
+        return 1.24 if regime in {Regime.TREND, Regime.BREAKOUT} else 1.14
+    if sym == "SOL/USDT":
+        return 1.34 if regime in {Regime.TREND, Regime.BREAKOUT} else 1.22
+
+    return 1.20 if regime in {Regime.TREND, Regime.BREAKOUT} else 1.10
+
+
 def no_trade_signal(symbol, regime, reason="No valid setup"):
     return TradeSignal(
         symbol=symbol,
@@ -60,6 +74,7 @@ def no_trade_signal(symbol, regime, reason="No valid setup"):
         take_profit_pct=0.0,
         secondary_take_profit_pct=0.0,
         trail_pct=0.0,
+        trail_atr_mult=0.0,
         size_multiplier=0.0,
         tp1_close_fraction=0.0,
         tp2_close_fraction=0.0,
@@ -135,6 +150,7 @@ def generate_signal(symbol: str, df: pd.DataFrame):
     row    = df.iloc[-1]
     regime = detect_regime(row)
     atr    = float(row["atr_pct"])
+    trail_atr_mult = _trail_atr_multiplier(symbol, regime)
 
     if regime == Regime.HIGH_VOL:
         return no_trade_signal(symbol, regime, "High volatility filter")
@@ -156,6 +172,7 @@ def generate_signal(symbol: str, df: pd.DataFrame):
                 take_profit_pct=_calc_tp(atr, 0.010, 2.2, 0.035),
                 secondary_take_profit_pct=_calc_tp(atr, 0.018, 3.4, 0.080),
                 trail_pct=_calc_tp(atr, 0.007, 1.4, 0.030),
+                trail_atr_mult=trail_atr_mult,
                 size_multiplier=_volatility_size_multiplier(atr, 1.15, 0.70, 1.10),
                 tp1_close_fraction=0.35,
                 tp2_close_fraction=0.50,
@@ -183,6 +200,7 @@ def generate_signal(symbol: str, df: pd.DataFrame):
                 take_profit_pct=_calc_tp(atr, 0.012, 2.0, 0.040),
                 secondary_take_profit_pct=_calc_tp(atr, 0.022, 3.0, 0.085),
                 trail_pct=_calc_tp(atr, 0.006, 1.1, 0.028),
+                trail_atr_mult=trail_atr_mult,
                 size_multiplier=_volatility_size_multiplier(atr, 1.0, 0.65, 1.05),
                 tp1_close_fraction=0.35,
                 tp2_close_fraction=0.50,
@@ -209,6 +227,7 @@ def generate_signal(symbol: str, df: pd.DataFrame):
                 take_profit_pct=_calc_tp(atr, 0.008, 1.6, 0.025),
                 secondary_take_profit_pct=_calc_tp(atr, 0.012, 2.1, 0.040),
                 trail_pct=_calc_tp(atr, 0.004, 0.8, 0.018),
+                trail_atr_mult=trail_atr_mult,
                 size_multiplier=_volatility_size_multiplier(atr, 0.85, 0.55, 1.00),
                 tp1_close_fraction=0.50,
                 tp2_close_fraction=0.50,
@@ -235,6 +254,7 @@ def generate_signal(symbol: str, df: pd.DataFrame):
                 take_profit_pct=_calc_tp(atr, 0.007, 1.4, 0.022),
                 secondary_take_profit_pct=_calc_tp(atr, 0.010, 1.9, 0.035),
                 trail_pct=_calc_tp(atr, 0.0035, 0.7, 0.015),
+                trail_atr_mult=trail_atr_mult,
                 size_multiplier=_volatility_size_multiplier(atr, 0.70, 0.50, 0.95),
                 tp1_close_fraction=0.50,
                 tp2_close_fraction=0.50,

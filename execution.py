@@ -3,6 +3,7 @@ execution.py — position lifecycle management.
 
 Enhancements:
   - Strategy auto-pause and symbol cooldown after losses
+  - Dynamic ATR-based trailing stop (live volatility aware)
 """
 
 from utils import send_telegram
@@ -63,7 +64,6 @@ def _record_close(cur, symbol, entry, close_price, closed_size, is_long, regime,
 
     log_trade_performance(cur, strategy, regime, pnl)
 
-    # ── dynamic risk reactions ───────────────────────────────────────────────
     try:
         evaluate_strategy_pause(cur, strategy)
         if pnl <= 0:
@@ -91,6 +91,7 @@ def open_position(
     tp3_pct,
     tp3_close_fraction,
     trail_pct,
+    trail_atr_mult,
     tp1_close_fraction,
     tp2_close_fraction,
     confidence,
@@ -108,14 +109,14 @@ def open_position(
             symbol, entry, sl, tp, tp2, tp3, size, original_size,
             regime, confidence, direction, strategy,
             stop_loss_pct, take_profit_pct, secondary_take_profit_pct,
-            trail_pct, tp1_close_fraction, tp2_close_fraction, tp3_close_fraction
+            trail_pct, trail_atr_mult, tp1_close_fraction, tp2_close_fraction, tp3_close_fraction
         )
-        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
     """, (
         symbol, price, sl, tp1, tp2, tp3, size, size,
         regime, confidence, direction, strategy,
         stop_loss_pct, take_profit_pct, secondary_take_profit_pct,
-        trail_pct, tp1_close_fraction, tp2_close_fraction, tp3_close_fraction,
+        trail_pct, trail_atr_mult, tp1_close_fraction, tp2_close_fraction, tp3_close_fraction,
     ))
     send_telegram(
         f"🚀 OPEN {symbol} | Entry={price:.4f} | SL={sl:.4f} | "
@@ -147,7 +148,7 @@ def close_position(cur, position: dict, price: float, reason: str = "manual_clos
 
 # ── manage position ───────────────────────────────────────────────────────────
 
-def manage_position(cur, position: dict, price: float) -> None:
+def manage_position(cur, position: dict, price: float, current_atr_pct: float | None = None) -> None:
     symbol        = position["symbol"]
     is_long       = position["direction"] == "LONG"
     entry         = float(position["entry"])
@@ -162,7 +163,9 @@ def manage_position(cur, position: dict, price: float) -> None:
     regime        = position.get("regime", "unknown")
     confidence    = float(position.get("confidence") or 0)
     strategy      = position.get("strategy", "unknown")
-    trail_pct     = float(position.get("trail_pct") or 0)
+
+    base_trail_pct = float(position.get("trail_pct") or 0)
+    trail_atr_mult = float(position.get("trail_atr_mult") or 0)
 
     # ── STOP LOSS ────────────────────────────────────────────────────────────
     if (is_long and price <= sl) or (not is_long and price >= sl):
@@ -170,11 +173,17 @@ def manage_position(cur, position: dict, price: float) -> None:
         send_telegram(f"❌ SL HIT {symbol} at {price:.4f}")
         return
 
-    # ── TRAILING STOP ────────────────────────────────────────────────────────
-    if tp1_hit and trail_pct > 0:
+    # ── TRAILING STOP (dynamic ATR) ──────────────────────────────────────────
+    if tp1_hit and base_trail_pct > 0:
+        dynamic_trail_pct = base_trail_pct
+
+        if current_atr_pct and current_atr_pct > 0 and trail_atr_mult > 0:
+            dynamic_trail_pct = max(dynamic_trail_pct, current_atr_pct * trail_atr_mult)
+
         new_trail_sl = (
-            price * (1 - trail_pct) if is_long else price * (1 + trail_pct)
+            price * (1 - dynamic_trail_pct) if is_long else price * (1 + dynamic_trail_pct)
         )
+
         if is_long and new_trail_sl > sl:
             cur.execute(
                 "UPDATE positions SET sl=%s, updated_at=NOW() WHERE symbol=%s",
@@ -235,9 +244,6 @@ def update_position_levels(
     tp2_pct: float,
     tp3_pct: float | None,
 ) -> None:
-    # Preserve any already-tightened stop loss. Recomputing a fresh SL on every
-    # loop would wipe out trailing stops and make a position appear "past SL"
-    # without actually closing.
     cur.execute(
         "SELECT entry, direction, tp3, sl FROM positions WHERE symbol=%s", (symbol,)
     )
